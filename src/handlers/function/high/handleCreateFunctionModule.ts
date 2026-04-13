@@ -39,6 +39,12 @@ export const TOOL_DEFINITION = {
         description:
           'Transport request number (e.g., E19K905635). Required for transportable packages.',
       },
+      processing_type: {
+        type: 'string',
+        enum: ['normal', 'rfc'],
+        description:
+          'Processing type: "normal" (default), "rfc" (Remote-Enabled Module)',
+      },
     },
     required: ['function_group_name', 'function_module_name'],
   },
@@ -49,6 +55,7 @@ interface CreateFunctionModuleArgs {
   function_module_name: string;
   description?: string;
   transport_request?: string;
+  processing_type?: string;
 }
 
 /**
@@ -98,6 +105,20 @@ export async function handleCreateFunctionModule(
       });
 
       logger?.info(`Function module created: ${functionModuleName}`);
+
+      // If processing_type is specified and not "normal", update metadata after creation
+      if (args.processing_type && args.processing_type !== 'normal') {
+        logger?.info(`Setting processing type to ${args.processing_type}`);
+        await (client.getFunctionModule() as any).updateMetadata(
+          {
+            functionModuleName,
+            functionGroupName,
+            transportRequest: args.transport_request,
+          },
+          { processingType: args.processing_type },
+        );
+        logger?.info(`Processing type set to ${args.processing_type}`);
+      }
 
       return return_response({
         data: JSON.stringify({

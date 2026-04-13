@@ -1,4 +1,44 @@
 import {
+  TOOL_DEFINITION as CreateAdobeForm_Tool,
+  handleCreateAdobeForm,
+} from '../../../handlers/adobe_form/handleCreateAdobeForm';
+import {
+  TOOL_DEFINITION as CreateAdobeFormInterface_Tool,
+  handleCreateAdobeFormInterface,
+} from '../../../handlers/adobe_form/handleCreateAdobeFormInterface';
+import {
+  TOOL_DEFINITION as DeleteAdobeForm_Tool,
+  handleDeleteAdobeForm,
+} from '../../../handlers/adobe_form/handleDeleteAdobeForm';
+import {
+  TOOL_DEFINITION as DeleteAdobeFormInterface_Tool,
+  handleDeleteAdobeFormInterface,
+} from '../../../handlers/adobe_form/handleDeleteAdobeFormInterface';
+import {
+  handleReadAdobeForm,
+  TOOL_DEFINITION as ReadAdobeForm_Tool,
+} from '../../../handlers/adobe_form/handleReadAdobeForm';
+import {
+  handleReadAdobeFormInterface,
+  TOOL_DEFINITION as ReadAdobeFormInterface_Tool,
+} from '../../../handlers/adobe_form/handleReadAdobeFormInterface';
+import {
+  handleUpdateAdobeForm,
+  TOOL_DEFINITION as UpdateAdobeForm_Tool,
+} from '../../../handlers/adobe_form/handleUpdateAdobeForm';
+import {
+  handleUpdateAdobeFormInterface,
+  TOOL_DEFINITION as UpdateAdobeFormInterface_Tool,
+} from '../../../handlers/adobe_form/handleUpdateAdobeFormInterface';
+import {
+  TOOL_DEFINITION as CallFunctionModule_Tool,
+  handleCallFunctionModule,
+} from '../../../handlers/function/high/handleCallFunctionModule';
+import {
+  handleUpdateFunctionModuleMetadata,
+  TOOL_DEFINITION as UpdateFunctionModuleMetadata_Tool,
+} from '../../../handlers/function/high/handleUpdateFunctionModuleMetadata';
+import {
   TOOL_DEFINITION as GetPackageTree_Tool,
   handleGetPackageTree,
 } from '../../../handlers/system/high/handleGetPackageTree';
@@ -283,6 +323,54 @@ export class SystemHandlersGroup extends BaseHandlerGroup {
             },
           );
         },
+      },
+      // Call function module handler
+      {
+        toolDefinition: CallFunctionModule_Tool,
+        handler: (args: any) => handleCallFunctionModule(this.context, args),
+      },
+      // Update function module metadata (processingType etc.)
+      {
+        toolDefinition: UpdateFunctionModuleMetadata_Tool,
+        handler: (args: any) =>
+          handleUpdateFunctionModuleMetadata(this.context, args),
+      },
+      // Adobe Form tools
+      {
+        toolDefinition: CreateAdobeFormInterface_Tool,
+        handler: (args: any) =>
+          handleCreateAdobeFormInterface(this.context, args),
+      },
+      {
+        toolDefinition: CreateAdobeForm_Tool,
+        handler: (args: any) => handleCreateAdobeForm(this.context, args),
+      },
+      {
+        toolDefinition: ReadAdobeFormInterface_Tool,
+        handler: (args: any) =>
+          handleReadAdobeFormInterface(this.context, args),
+      },
+      {
+        toolDefinition: ReadAdobeForm_Tool,
+        handler: (args: any) => handleReadAdobeForm(this.context, args),
+      },
+      {
+        toolDefinition: UpdateAdobeFormInterface_Tool,
+        handler: (args: any) =>
+          handleUpdateAdobeFormInterface(this.context, args),
+      },
+      {
+        toolDefinition: UpdateAdobeForm_Tool,
+        handler: (args: any) => handleUpdateAdobeForm(this.context, args),
+      },
+      {
+        toolDefinition: DeleteAdobeFormInterface_Tool,
+        handler: (args: any) =>
+          handleDeleteAdobeFormInterface(this.context, args),
+      },
+      {
+        toolDefinition: DeleteAdobeForm_Tool,
+        handler: (args: any) => handleDeleteAdobeForm(this.context, args),
       },
       // High-level handler for package tree
       {

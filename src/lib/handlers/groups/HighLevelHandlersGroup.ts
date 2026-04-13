@@ -167,6 +167,10 @@ import {
   handleGetFunctionModule,
 } from '../../../handlers/function_module/high/handleGetFunctionModule';
 import {
+  handleUpdateInclude,
+  TOOL_DEFINITION as UpdateInclude_Tool,
+} from '../../../handlers/include/high/handleUpdateInclude';
+import {
   TOOL_DEFINITION as CreateInterface_Tool,
   handleCreateInterface,
 } from '../../../handlers/interface/high/handleCreateInterface';
@@ -640,6 +644,10 @@ export class HighLevelHandlersGroup extends BaseHandlerGroup {
       {
         toolDefinition: UpdateProgramHigh_Tool,
         handler: withContext(handleUpdateProgramHigh),
+      },
+      {
+        toolDefinition: UpdateInclude_Tool,
+        handler: withContext(handleUpdateInclude),
       },
       {
         toolDefinition: DeleteProgram_Tool,
