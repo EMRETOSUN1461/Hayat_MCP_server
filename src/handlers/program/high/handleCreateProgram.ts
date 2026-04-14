@@ -10,6 +10,7 @@ import { createAdtClient } from '../../../lib/clients';
 import type { HandlerContext } from '../../../lib/handlers/interfaces';
 import {
   encodeSapObjectName,
+  getManagedConnection,
   isCloudConnection,
   parseValidationResponse,
   return_error,
@@ -76,6 +77,44 @@ interface CreateProgramArgs {
   application?: string;
 }
 
+/**
+ * Create include program via /sap/bc/adt/programs/includes endpoint.
+ * This endpoint generates correct initial source (*& Include xxx) instead of REPORT xxx.
+ * Using /programs/programs with programType="I" creates includes with REPORT statement
+ * which causes activation deadlocks (double REPORT when parent program INCLUDEs it).
+ */
+async function createIncludeProgram(
+  context: HandlerContext,
+  args: {
+    programName: string;
+    description: string;
+    packageName: string;
+    transportRequest?: string;
+  },
+): Promise<void> {
+  const { connection, logger } = context;
+  const conn = connection || getManagedConnection();
+  const description = (args.description || args.programName).substring(0, 60);
+  const url = `/sap/bc/adt/programs/includes${args.transportRequest ? `?corrNr=${args.transportRequest}` : ''}`;
+
+  const metadataXml = `<?xml version="1.0" encoding="UTF-8"?><include:abapInclude xmlns:include="http://www.sap.com/adt/programs/includes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:description="${description}" adtcore:language="EN" adtcore:name="${args.programName}" adtcore:type="PROG/I" adtcore:masterLanguage="EN">
+  <adtcore:packageRef adtcore:name="${args.packageName}"/>
+</include:abapInclude>`;
+
+  logger?.debug(`[createIncludeProgram] POST ${url} for ${args.programName}`);
+
+  await conn.makeAdtRequest({
+    url,
+    method: 'POST',
+    timeout: 30000,
+    data: metadataXml,
+    headers: {
+      Accept: 'application/vnd.sap.adt.programs.includes+xml',
+      'Content-Type': 'application/vnd.sap.adt.programs.includes+xml',
+    },
+  });
+}
+
 export async function handleCreateProgram(
   context: HandlerContext,
   params: any,
@@ -133,27 +172,46 @@ export async function handleCreateProgram(
     }
     logger?.debug(`Program validation passed: ${programName}`);
 
-    // Create
-    logger?.debug(`Creating program: ${programName}`);
-    await client.getProgram().create({
-      programName,
-      description: args.description || programName,
-      packageName: args.package_name,
-      transportRequest: args.transport_request,
-      programType: args.program_type,
-      application: args.application,
-    });
-    logger?.info(`Program created: ${programName}`);
+    // Create — use different endpoint for includes
+    const isInclude = args.program_type === 'include';
+    logger?.debug(
+      `Creating ${isInclude ? 'include' : 'program'}: ${programName}`,
+    );
 
+    if (isInclude) {
+      // Include programs must be created via /sap/bc/adt/programs/includes
+      // Using /programs/programs creates them with wrong initial source (REPORT xxx.)
+      await createIncludeProgram(context, {
+        programName,
+        description: args.description || `Include ${programName}`,
+        packageName: args.package_name,
+        transportRequest: args.transport_request,
+      });
+    } else {
+      await client.getProgram().create({
+        programName,
+        description: args.description || programName,
+        packageName: args.package_name,
+        transportRequest: args.transport_request,
+        programType: args.program_type,
+        application: args.application,
+      });
+    }
+    logger?.info(
+      `${isInclude ? 'Include' : 'Program'} created: ${programName}`,
+    );
+
+    const lowerName = encodeSapObjectName(programName).toLowerCase();
+    const uriPath = isInclude ? 'includes' : 'programs';
     const result = {
       success: true,
       program_name: programName,
       package_name: args.package_name,
       transport_request: args.transport_request || null,
       program_type: args.program_type || 'executable',
-      type: 'PROG/P',
-      message: `Program ${programName} created successfully. Use UpdateProgram to set source code.`,
-      uri: `/sap/bc/adt/programs/programs/${encodeSapObjectName(programName).toLowerCase()}`,
+      type: isInclude ? 'PROG/I' : 'PROG/P',
+      message: `Program ${programName} created successfully. Use ${isInclude ? 'UpdateInclude' : 'UpdateProgram'} to set source code.`,
+      uri: `/sap/bc/adt/programs/${uriPath}/${lowerName}`,
       steps_completed: ['validate', 'create'],
     };
 

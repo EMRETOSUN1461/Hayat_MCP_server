@@ -154,7 +154,7 @@
 
 6. **Mesaj kontrolü:** Aynı mesaj zaten varsa yenisi oluşturulmaz. Bir modülün mesajı başka modülün mesaj class'ından verilmez.
 
-7. **Data element/domain kontrolü:** Standartta uygun olan varsa yenisi oluşturulmaz.
+7. **Data element/domain kontrolü:** Standartta uygun olan varsa yenisi oluşturulmaz. Structure ve tablolarda generic/built-in tipler (`abap.char`, `abap.quan`, `abap.curr` vb.) kesinlikle kullanılmaz — her alan için mutlaka data element kullanılır.
 
 8. **Reuse ALV kullanılmaz.** CL_GUI_ALV_GRID tercih edilir.
 
@@ -326,6 +326,61 @@ Numaralar B1'de sorulacak. Ek olarak:
 - Created By / Analyst isimleri
 - Gerekli structure, table type varsa numaraları
 
+### B4. Structure Oluşturma
+
+Agent, structure oluşturmadan önce **mutlaka** kullanıcıdan alan bilgilerini aşağıdaki formatta ister. Agent asla kendi başına alan listesi belirlemez.
+
+**İstenecek format:**
+```
+Structure Adı: ZXX_NNN_SNN
+Component      | Component Type | Curr/Quan Ref
+---------------|---------------|------------------
+VBELN          | VBELN_VA      |
+KUNNR          | KUNAG         |
+KWMENG         | KWMENG        | VBAP-VRKME
+NETWR          | NETWR_AP      | VBAP-WAERK
+WAERK          | WAERK         |
+```
+- `Curr/Quan Ref` kolonuna CURR/QUAN alanları için `TABLO-ALAN` formatında referans yazılır (ör: `MARA-MEINS`, `VBAP-WAERK`)
+- CURR/QUAN olmayan alanlar için boş bırakılır
+
+**Kurallar:**
+- **Her alan için mutlaka data element kullanılır.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)` gibi generic/built-in tipler kesinlikle kullanılmaz. `Component Type` kolonu boşsa agent tahmin yapmaz — kullanıcıdan data element bilgisini ister. Bu bilgi alınmadan structure oluşturulmaz.
+- `Curr/Quan Ref` kolonunda referans varsa, bu bilgi DDL'de `@Semantics` annotation'ı olarak yazılır
+- **Curr/Quan Ref dış tabloya referanstır.** Birim/para birimi alanının aynı structure içinde olması gerekmez. Örneğin `MENGE` alanı `MARA-MEINS` referansı alıyorsa, MEINS alanı structure'a eklenmez — sadece annotation yazılır.
+- **`@Semantics` annotation formatı:** `TABLO-ALAN` referansı küçük harfle, tire yerine nokta ile yazılır: `MARA-MEINS` → `@Semantics.quantity.unitOfMeasure : 'mara.meins'`, `VBAP-WAERK` → `@Semantics.amount.currencyCode : 'vbap.waerk'`
+- Eğer birim/para birimi alanı structure'ın kendi içinde de varsa (kullanıcı eklenmesini istediyse), annotation kendi structure'ına referans verir: `'zsd_999_s01.waerk'`
+- Agent bu bilgiyi almadan structure DDL kodu yazmaz
+
+### B5. Tablo Oluşturma
+
+Agent, tablo oluşturmadan önce **mutlaka** kullanıcıdan alan ve tablo özellik bilgilerini aşağıdaki formatta ister. Agent asla kendi başına alan listesi veya tablo özellikleri belirlemez.
+
+**İstenecek format:**
+```
+Tablo Adı: ZXX_NNN_TNN
+Field   | Key | Initial | Data Element | Check Table | Curr/Quan Ref
+--------|-----|---------|-------------|-------------|------------------
+MANDT   | X   | X       | MANDT       | T000        |
+VBELN   | X   | X       | VBELN_VA    | VBAK        |
+KUNNR   |     |         |             |             |
+NETWR   |     |         |             |             | VBAP-WAERK
+
+Delivery Class       : C (veya A, L, G, W, S, E)
+Data Browser/Table View Editing : Display/Maintenance Allowed (veya with Restrictions, Not Allowed)
+```
+- `Data Class` ve `Size Category` sorulmaz, default olarak `APPL2` ve `0` kullanılır
+
+**Kurallar:**
+- **Her alan için mutlaka data element kullanılır.** Generic/built-in tipler (`abap.char`, `abap.quan`, `abap.curr`, `abap.numc` vb.) kesinlikle kullanılmaz. `Data Element` kolonu boşsa agent tahmin yapmaz — kullanıcıdan data element bilgisini ister. Bu bilgi alınmadan tablo oluşturulmaz.
+- **Curr/Quan Ref dış tabloya referanstır.** Birim/para birimi alanının aynı tabloda olması gerekmez. Agent kullanıcının vermediği alanı otomatik eklemez.
+- `Key` kolonunda `X` olan alanlar primary key'dir
+- `Initial` kolonunda `X` olan alanlar NOT NULL'dur
+- `Check Table` belirtilmişse DDL'de `with foreign key` ile foreign key ilişkisi oluşturulur
+- **Search help DDL tablo tanımında desteklenmez.** Kullanıcı search help'i SE11'den manuel ekler. Formatta search help istenmez.
+- `Curr/Quan Ref` kolonunda CURR/QUAN alanları için `TABLO-ALAN` formatında referans zorunludur (ör: `VBAP-WAERK`)
+- Agent bu bilgilerin tamamını almadan tablo oluşturmaz
+
 ### B3. Exit/BAdI/Enhancement Geliştirme
 
 Bu alan en çok numara gerektiren kısımdır. Tüm numaralar ZBCENH üzerinden developer tarafından takip edilir. Agent hiçbir numarayı tahmin etmez, hepsini kullanıcıya sorar.
@@ -372,43 +427,115 @@ Numaralar B1'de sorulacak. Ek olarak:
 
 ### C1. ALV Rapor Programı Yapısı (ZBC_000_IF01 Pattern)
 
-Hayat'ta tüm ALV raporları aynı yapıyı takip eder:
+Hayat'ta tüm ALV raporları aynı yapıyı takip eder. **Referans program: ZSD_616_P01 / ZSD_616_CL01.**
 
-**Ana Program (ZMM_399_P01):**
+**Ana Program (ZSD_616_P01):**
 ```abap
-REPORT zmm_399_p01.
-INCLUDE zmm_399_p01_i01.
+REPORT zsd_616_p01.
+INCLUDE zsd_616_p01_i01.
 
 INITIALIZATION.
-  PERFORM initialization.
+  CREATE OBJECT go_main.
 
 START-OF-SELECTION.
   go_main->zbc_000_if01~start_of_selection( ).
 
 END-OF-SELECTION.
+  IF go_main->gt_record IS INITIAL.
+    MESSAGE s022(zbc).
+    RETURN.
+  ENDIF.
+
   CALL FUNCTION 'ZBC_000_FM01'
     EXPORTING
       io_screen = go_main.
-
-FORM initialization.
-  CREATE OBJECT go_main.
-ENDFORM.
 ```
 
-**Include (ZMM_399_P01_I01):**
-- `DATA: go_main TYPE REF TO zmm_399_cl01.` tanımı
-- TABLES bildirimleri
+**Include (ZSD_616_P01_I01):**
+- `DATA: go_main TYPE REF TO zsd_616_cl01.` tanımı
+- TABLES bildirimleri veya DATA BEGIN OF so yapısı
 - SELECTION-SCREEN blokları (s_, p_ prefix'leri ile)
 
-**Program Sınıfı (ZMM_399_CL01):**
-- `ZBC_000_IF01` interface'ini implement eder
-- Public section'da: `gs_range`, `gt_data`, `gs_data` gibi veri tanımları (structure ve table type referanslarıyla: ZMM_399_S01, ZMM_399_TT01)
-- Interface metodları: `start_of_selection`, `get_datas`, `create_alv_object`, `fill_field_catalog`, `fill_layout`, `exclude_buttons`, `screen_pbo`, `screen_pai`, `alv_toolbar`, `alv_user_command`, `alv_hotspot_click` vb.
-- `start_of_selection` içinde: `zbc_000_cl01=>get_selections_from_program()` ile selection screen değerleri alınır
-- `fill_field_catalog` içinde: `LVC_FIELDCATALOG_MERGE` ile structure'dan fcat üretilir, TEXT-xxx ile kolon başlıkları atanır
-- `fill_layout` içinde: zebra, cwidth_opt, sel_mode gibi layout ayarları
-- ALV handler'ları: `SET HANDLER me->zbc_000_if01~alv_toolbar FOR zbc_000_if01~go_alv` pattern'i
-- İlk gösterim: `zbc_000_if01~go_alv->set_table_for_first_display()`
+**Program Sınıfı — Kritik Metodlar (ZSD_616_CL01 referans):**
+
+`constructor`:
+```abap
+METHOD constructor.
+  me->zbc_000_if01~gv_struc_name = 'ZXX_NNN_SNN'.
+ENDMETHOD.
+```
+
+`screen_pbo` — **PF-STATUS ve IS INITIAL kontrolü zorunlu:**
+```abap
+METHOD zbc_000_if01~screen_pbo.
+  SET PF-STATUS 'GUI100' OF PROGRAM iv_program.
+  IF zbc_000_if01~go_alv IS INITIAL.
+    me->zbc_000_if01~create_alv_object( ).
+    me->zbc_000_if01~gv_title = sy-title.
+  ELSE.
+    zbc_000_cl09=>refresh_table_display( io_alv_grid = zbc_000_if01~go_alv ).
+  ENDIF.
+ENDMETHOD.
+```
+
+`create_alv_object` — **Container ve ALV nesnesi burada oluşturulur (CHECK IS BOUND yapılmaz!):**
+```abap
+METHOD zbc_000_if01~create_alv_object.
+  DATA: lo_container TYPE REF TO cl_gui_custom_container.
+  DATA: ls_layout  TYPE lvc_s_layo, ls_variant TYPE disvariant.
+  DATA: lt_exclude TYPE ui_functions, lt_fcat TYPE lvc_t_fcat.
+
+  CREATE OBJECT lo_container EXPORTING container_name = 'ALV_CONTAINER'.
+  CREATE OBJECT zbc_000_if01~go_alv EXPORTING i_parent = lo_container.
+
+  lt_fcat    = me->zbc_000_if01~fill_field_catalog( iv_structure_name = me->zbc_000_if01~gv_struc_name ).
+  lt_exclude = me->zbc_000_if01~exclude_buttons( ).
+  ls_layout  = me->zbc_000_if01~fill_layout( ).
+  ls_variant-report = sy-cprog.
+
+  CALL METHOD zbc_000_if01~go_alv->set_table_for_first_display
+    EXPORTING is_layout = ls_layout  it_toolbar_excluding = lt_exclude
+              is_variant = ls_variant  i_save = 'A'  i_default = 'X'
+    CHANGING  it_outtab = gt_data  it_fieldcatalog = lt_fcat.
+ENDMETHOD.
+```
+
+`fill_field_catalog` — **Data element'ten gelen başlıklar kullanılır, hardcode başlık yazılmaz:**
+```abap
+METHOD zbc_000_if01~fill_field_catalog.
+  FREE rt_fcat.
+  CALL FUNCTION 'LVC_FIELDCATALOG_MERGE'
+    EXPORTING i_structure_name = iv_structure_name
+    CHANGING  ct_fieldcat = rt_fcat.
+  LOOP AT rt_fcat ASSIGNING FIELD-SYMBOL(<fs>).
+    <fs>-colddictxt = 'L'.   " Data element long text kullan
+    " Sadece özel durumlar için müdahale:
+    " WHEN 'VRKME'. <fs>-no_out = abap_true.
+    " WHEN 'NETWR'. <fs>-cfieldname = 'WAERK'.
+  ENDLOOP.
+  gt_fcat = rt_fcat.
+ENDMETHOD.
+```
+
+`screen_pai`:
+```abap
+METHOD zbc_000_if01~screen_pai.
+  CASE iv_ucomm.
+    WHEN 'BACK' OR 'EXIT' OR 'CANCEL'.
+      zbc_000_if01~go_alv->free( ).
+      FREE: gt_data.
+      SET SCREEN 0. LEAVE SCREEN.
+  ENDCASE.
+ENDMETHOD.
+```
+
+**Önemli noktalar:**
+- `create_alv_object` içinde `CHECK go_alv IS BOUND` **yapılmaz** — bu metod container ve ALV nesnesini kendisi oluşturur
+- `screen_pbo` içinde `SET PF-STATUS 'GUI100' OF PROGRAM iv_program` **zorunludur**
+- `screen_pbo` içinde `IF go_alv IS INITIAL` kontrolü ile ALV sadece bir kez oluşturulur, sonraki PBO'larda refresh yapılır
+- `fill_field_catalog` içinde `colddictxt = 'L'` ile data element long text'leri kullanılır, hardcode başlık verilmez
+- `set_table_for_first_display` çağrısında `is_variant` ve `i_save = 'A'` parametreleri layout kaydetme desteği sağlar
+- Basit ALV raporlarında SET HANDLER (hotspot, double_click, toolbar, user_command) eklenmez, sadece gerektiğinde eklenir
 
 ### C2. Hayat Enhancement Exit Class (ZSD_167_ENHA_E051_CL01)
 
@@ -504,3 +631,7 @@ CLASS-METHODS:
 6. **Standart tablolara doğrudan SQL yazmaz.** Standart SAP tablolarına INSERT/UPDATE/DELETE/MODIFY yazmak yerine uygun BAPI/FM/sınıf arar. Bulamazsa kullanıcıyı bilgilendirir ve o tabloya müdahale etmez. Z/Y tabloları bu kuraldan muaftır.
 7. **Transport numarasını her zaman sorar.** Nesne oluşturmaya veya değiştirmeye başlamadan önce kullanılacak transport request numarasını kullanıcıdan alır.
 8. **Alt paket yoksa önce oluşturur.** Nesne oluşturmaya başlamadan önce hedef alt paketin (ZXX_NNN) var olup olmadığını kontrol eder. Yoksa `CreatePackage` ile oluşturur ve aktive eder. Bu adımı kullanıcıya sormadan otomatik yapar.
+9. **Structure oluşturmadan önce alan bilgilerini sorar.** Agent hiçbir zaman kendi başına structure alan listesi belirlemez. Kullanıcıdan B4 bölümündeki formatta alan bilgilerini ister. CURR/QUAN alanları için `Curr/Quan Ref` kolonunda `TABLO-ALAN` formatında referans zorunludur.
+10. **Tablo oluşturmadan önce alan ve özellik bilgilerini sorar.** Agent hiçbir zaman kendi başına tablo alan listesi belirlemez. Kullanıcıdan B5 bölümündeki formatta bilgileri ister. `Data Class` (default: APPL2) ve `Size Category` (default: 0) sorulmaz. Search help ve SM30 bakım ekranı DDL'de desteklenmez — kullanıcı SE11'den manuel ekler.
+11. **Structure ve tablolarda generic tip kullanmaz.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)`, `abap.int4` gibi built-in/generic tipler kesinlikle kullanılmaz. Her alan için mutlaka sistemdeki bir data element kullanılır (ör: `KWMENG`, `NETWR_AP`, `VBELN_VA`). Data element bilgisi verilmeden agent structure veya tablo oluşturmaz — kullanıcıdan data element adını ister.
+12. **ALV sınıflarında referans program ZSD_616_CL01'dir.** `create_alv_object` içinde container ve ALV nesnesi oluşturulur (`CHECK IS BOUND` yapılmaz). `screen_pbo` içinde `SET PF-STATUS` ve `IF go_alv IS INITIAL` kontrolü zorunludur. `fill_field_catalog` içinde kolon başlıkları data element'ten gelir, hardcode yazılmaz (`colddictxt = 'L'`).
