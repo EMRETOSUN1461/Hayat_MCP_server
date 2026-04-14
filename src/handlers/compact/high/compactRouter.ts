@@ -49,6 +49,7 @@ import { handleUpdateInterface } from '../../interface/high/handleUpdateInterfac
 import { handleDeleteMetadataExtension } from '../../metadata_extension/high/handleDeleteMetadataExtension';
 import { handleGetMetadataExtension } from '../../metadata_extension/high/handleGetMetadataExtension';
 import { handleCreatePackage } from '../../package/high/handleCreatePackage';
+import { handleDeletePackage } from '../../package/high/handleDeletePackage';
 import { handleGetPackage } from '../../package/high/handleGetPackage';
 import { handleCreateProgram } from '../../program/high/handleCreateProgram';
 import { handleDeleteProgram } from '../../program/high/handleDeleteProgram';
@@ -103,6 +104,7 @@ export const compactRouterMap: CompactRouterMap = {
   PACKAGE: {
     create: handleCreatePackage as unknown as CompactHandler,
     get: handleGetPackage as unknown as CompactHandler,
+    delete: handleDeletePackage as unknown as CompactHandler,
   },
   DOMAIN: {
     create: handleCreateDomain as unknown as CompactHandler,

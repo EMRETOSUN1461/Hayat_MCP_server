@@ -4,7 +4,7 @@
  * Uses PackageBuilder from @mcp-abap-adt/adt-clients for all operations.
  * Session and lock management handled internally by builder.
  *
- * Workflow: validate -> create -> check
+ * Workflow: validate -> create -> check -> activate
  */
 
 import type { IPackageConfig } from '@mcp-abap-adt/adt-clients';
@@ -15,6 +15,7 @@ import {
   type AxiosResponse,
   ErrorCode,
   McpError,
+  parseActivationResponse,
   return_error,
   return_response,
 } from '../../../lib/utils';
@@ -122,16 +123,82 @@ export async function handleCreatePackage(
     const client = createAdtClient(connection, logger);
 
     try {
-      // Validate
-      await client.getPackage().validate({
-        packageName: packageName,
-        superPackage: typedArgs.super_package,
-        description: typedArgs.description || packageName,
-        softwareComponent: typedArgs.software_component,
-        transportLayer: typedArgs.transport_layer,
-        transportRequest: typedArgs.transport_request,
-        applicationComponent: typedArgs.application_component,
-      });
+      // Validate — tolerate "already exists" (409) so we can recover inactive packages
+      try {
+        await client.getPackage().validate({
+          packageName: packageName,
+          superPackage: typedArgs.super_package,
+          description: typedArgs.description || packageName,
+          softwareComponent: typedArgs.software_component,
+          transportLayer: typedArgs.transport_layer,
+          transportRequest: typedArgs.transport_request,
+          applicationComponent: typedArgs.application_component,
+        });
+      } catch (validateError: any) {
+        // Only treat HTTP 409 as "already exists" — string matching on response bodies is unreliable
+        const isAlreadyExists = validateError.response?.status === 409;
+        if (!isAlreadyExists) {
+          // Log the actual error details for debugging
+          logger?.error(
+            `Validate failed for ${packageName}: HTTP ${validateError.response?.status || 'N/A'}, message: ${validateError.message}`,
+          );
+          if (typeof validateError.response?.data === 'string') {
+            logger?.error(
+              `Validate response body: ${validateError.response.data.slice(0, 500)}`,
+            );
+          }
+          throw validateError;
+        }
+        logger?.info(
+          `Validate reports ${packageName} already exists (409) — attempting activate.`,
+        );
+        // Try to activate the existing inactive package
+        try {
+          const activationResponse = await client
+            .getUtils()
+            .activateObjectsGroup(
+              [{ type: 'DEVC/K', name: packageName }],
+              true,
+            );
+          const activationResult = parseActivationResponse(
+            activationResponse.data,
+          );
+          logger?.info(
+            `Activation result for ${packageName}: activated=${activationResult.activated}`,
+          );
+        } catch (actErr: any) {
+          logger?.warn(
+            `Activate attempt for ${packageName} failed: ${actErr.message}`,
+          );
+        }
+        // Verify if package is now readable
+        try {
+          const readResult = await client
+            .getPackage()
+            .read({ packageName }, 'active', {});
+          if (readResult?.readResult) {
+            logger?.info(
+              `✅ Package ${packageName} is now active and readable.`,
+            );
+            return return_response({
+              data: JSON.stringify(
+                {
+                  success: true,
+                  package_name: packageName,
+                  description: typedArgs.description || packageName,
+                  super_package: typedArgs.super_package,
+                  message: `Package ${packageName} already existed and is now active.`,
+                },
+                null,
+                2,
+              ),
+            } as AxiosResponse);
+          }
+        } catch (_readErr: any) {
+          // Package not readable — fall through to throw
+        }
+        throw validateError; // re-throw to be handled by outer catch
+      }
 
       // Create - build config object with proper typing
       const createConfig: Partial<IPackageConfig> &
@@ -175,6 +242,36 @@ export async function handleCreatePackage(
         packageName: packageName,
         superPackage: typedArgs.super_package,
       });
+
+      // Activate — tolerate activation errors if the package ends up readable
+      logger?.info(`Activating package ${packageName}...`);
+      try {
+        const activationResponse = await client
+          .getUtils()
+          .activateObjectsGroup([{ type: 'DEVC/K', name: packageName }], true);
+        const activationResult = parseActivationResponse(
+          activationResponse.data,
+        );
+        if (!activationResult.activated) {
+          logger?.warn(
+            `Package ${packageName} created but activation returned warnings: ${JSON.stringify(activationResult.messages)}`,
+          );
+        }
+      } catch (activateErr: any) {
+        logger?.warn(
+          `Activation threw for ${packageName}: ${activateErr.message}. Verifying package state...`,
+        );
+        // Activation may fail with parse errors but the package could still be active
+        const readResult = await client
+          .getPackage()
+          .read({ packageName }, 'active', {});
+        if (!readResult?.readResult) {
+          throw activateErr; // Package genuinely not active — propagate the error
+        }
+        logger?.info(
+          `Package ${packageName} is readable despite activation error — treating as success.`,
+        );
+      }
 
       logger?.info(`✅ CreatePackage completed successfully: ${packageName}`);
 
@@ -225,24 +322,120 @@ export async function handleCreatePackage(
         );
       }
 
-      // Check if package already exists
-      const errorMessageLower = error.message?.toLowerCase() || '';
-      const errorDataLower =
-        typeof error.response?.data === 'string'
-          ? error.response.data.toLowerCase()
-          : '';
-      if (
-        errorMessageLower.includes('already exists') ||
-        errorMessageLower.includes('does already exist') ||
-        errorDataLower.includes('already exists') ||
-        errorDataLower.includes('does already exist') ||
-        errorDataLower.includes('exceptionresourcealreadyexists') ||
-        error.response?.status === 409
-      ) {
+      // Check if package already exists (HTTP 409 with ExceptionResourceAlreadyExists) — try to recover
+      // First, extract the SAP error message from the 409 response for diagnostics
+      const sapErrorDetail = responseSnippet
+        ? responseSnippet.slice(0, 300)
+        : error.message || 'unknown';
+      const isAlreadyExistsConflict =
+        error.response?.status === 409 &&
+        (responseData.includes('ExceptionResourceAlreadyExists') ||
+          responseData.includes('already exist'));
+      if (error.response?.status === 409 && !isAlreadyExistsConflict) {
+        // 409 but NOT "already exists" — e.g. lock conflict, transport mismatch
         throw new McpError(
-          ErrorCode.InvalidParams,
-          `Package ${packageName} already exists. Please delete it first or use a different name.`,
+          ErrorCode.InternalError,
+          `SAP returned conflict (409) for ${packageName}: ${sapErrorDetail}`,
         );
+      }
+      if (isAlreadyExistsConflict) {
+        // Strategy 1: try activate — package may be inactive from a prior failed attempt
+        try {
+          logger?.info(
+            `Package ${packageName} already exists (409). Attempting activation...`,
+          );
+          await client
+            .getUtils()
+            .activateObjectsGroup(
+              [{ type: 'DEVC/K', name: packageName }],
+              true,
+            );
+          // Activation call succeeded (no exception) — verify package is readable
+          try {
+            const readResult = await client
+              .getPackage()
+              .read({ packageName }, 'active', {});
+            if (readResult?.readResult) {
+              logger?.info(
+                `✅ Package ${packageName} activated and verified readable.`,
+              );
+              return return_response({
+                data: JSON.stringify(
+                  {
+                    success: true,
+                    package_name: packageName,
+                    description: typedArgs.description || packageName,
+                    super_package: typedArgs.super_package,
+                    message: `Package ${packageName} already existed (inactive) and was activated successfully.`,
+                  },
+                  null,
+                  2,
+                ),
+              } as AxiosResponse);
+            }
+          } catch (_readErr: any) {
+            // Not readable after activation — continue to delete+recreate
+          }
+        } catch (activateError: any) {
+          logger?.warn(
+            `Activation failed for ${packageName}: ${activateError.message}`,
+          );
+        }
+
+        // Strategy 2: delete broken package, then recreate from scratch
+        try {
+          logger?.info(
+            `Trying delete + recreate for broken package ${packageName}...`,
+          );
+          await client.getPackage().delete({
+            packageName: packageName,
+            transportRequest: typedArgs.transport_request,
+          });
+          logger?.info(`Deleted broken package ${packageName}. Recreating...`);
+          await client.getPackage().create({
+            packageName,
+            superPackage: typedArgs.super_package,
+            description: typedArgs.description || packageName,
+            softwareComponent: typedArgs.software_component,
+            packageType: typedArgs.package_type,
+            transportLayer: typedArgs.transport_layer,
+            transportRequest: typedArgs.transport_request,
+          });
+          await client.getPackage().check({
+            packageName: packageName,
+            superPackage: typedArgs.super_package,
+          });
+          await client
+            .getUtils()
+            .activateObjectsGroup(
+              [{ type: 'DEVC/K', name: packageName }],
+              true,
+            );
+          logger?.info(
+            `✅ Package ${packageName} recreated and activated successfully.`,
+          );
+          return return_response({
+            data: JSON.stringify(
+              {
+                success: true,
+                package_name: packageName,
+                description: typedArgs.description || packageName,
+                super_package: typedArgs.super_package,
+                message: `Package ${packageName} was recreated and activated successfully (recovered from broken state).`,
+              },
+              null,
+              2,
+            ),
+          } as AxiosResponse);
+        } catch (recreateError: any) {
+          logger?.error(
+            `Failed to recreate package ${packageName}: ${recreateError.message}`,
+          );
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Package ${packageName} got 409 from SAP. SAP response: ${sapErrorDetail}. Recovery failed (activate then delete+recreate): ${recreateError.message}`,
+          );
+        }
       }
 
       // Check for 401/403 authentication errors

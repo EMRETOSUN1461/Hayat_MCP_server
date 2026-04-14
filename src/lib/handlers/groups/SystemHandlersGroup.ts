@@ -73,6 +73,10 @@ import {
   handleGetAdtTypes,
 } from '../../../handlers/system/readonly/handleGetAllTypes';
 import {
+  TOOL_DEFINITION as GetHayatCodingStandards_Tool,
+  handleGetHayatCodingStandards,
+} from '../../../handlers/system/readonly/handleGetHayatCodingStandards';
+import {
   TOOL_DEFINITION as GetInactiveObjects_Tool,
   handleGetInactiveObjects,
 } from '../../../handlers/system/readonly/handleGetInactiveObjects';
@@ -386,6 +390,12 @@ export class SystemHandlersGroup extends BaseHandlerGroup {
             },
           );
         },
+      },
+      // Hayat Holding coding standards
+      {
+        toolDefinition: GetHayatCodingStandards_Tool,
+        handler: (args: any) =>
+          handleGetHayatCodingStandards(this.context, args),
       },
     ];
   }

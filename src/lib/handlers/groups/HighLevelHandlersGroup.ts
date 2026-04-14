@@ -201,6 +201,10 @@ import {
   handleCreatePackage,
 } from '../../../handlers/package/high/handleCreatePackage';
 import {
+  TOOL_DEFINITION as DeletePackage_Tool,
+  handleDeletePackage,
+} from '../../../handlers/package/high/handleDeletePackage';
+import {
   TOOL_DEFINITION as GetPackage_Tool,
   handleGetPackage,
 } from '../../../handlers/package/high/handleGetPackage';
@@ -392,6 +396,10 @@ export class HighLevelHandlersGroup extends BaseHandlerGroup {
       {
         toolDefinition: GetPackage_Tool,
         handler: withContext(handleGetPackage),
+      },
+      {
+        toolDefinition: DeletePackage_Tool,
+        handler: withContext(handleDeletePackage),
       },
       {
         toolDefinition: CreateDomain_Tool,
