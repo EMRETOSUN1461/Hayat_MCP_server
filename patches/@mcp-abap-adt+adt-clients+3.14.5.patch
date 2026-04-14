@@ -1,0 +1,270 @@
+diff --git a/node_modules/@mcp-abap-adt/adt-clients/dist/core/dataElement/update.js b/node_modules/@mcp-abap-adt/adt-clients/dist/core/dataElement/update.js
+index 53f04a3..a3428b6 100644
+--- a/node_modules/@mcp-abap-adt/adt-clients/dist/core/dataElement/update.js
++++ b/node_modules/@mcp-abap-adt/adt-clients/dist/core/dataElement/update.js
+@@ -84,10 +84,16 @@ async function getDomainInfo(connection, domainName) {
+  */
+ function patchDataElementXml(currentXml, args) {
+     let xml = currentXml;
+-    // Description
++    // Description — must target root element specifically, not packageRef
+     if (args.description) {
+         const description = (0, internalUtils_1.limitDescription)(args.description);
+-        xml = (0, xmlPatch_1.patchXmlAttribute)(xml, 'adtcore:description', description);
++        const descEscaped = description.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
++        const rootTag = xml.match(/<blue:wbobj\s[^>]*/);
++        if (rootTag && rootTag[0].includes('adtcore:description=')) {
++            xml = (0, xmlPatch_1.patchXmlElementAttribute)(xml, 'blue:wbobj', 'adtcore:description', description);
++        } else {
++            xml = xml.replace(/<blue:wbobj\s/, `<blue:wbobj adtcore:description="${descEscaped}" `);
++        }
+     }
+     // Type information
+     xml = (0, xmlPatch_1.patchIf)(xml, args.type_kind, (x, val) => (0, xmlPatch_1.patchXmlElement)(x, 'dtel:typeKind', val));
+@@ -107,22 +113,18 @@ function patchDataElementXml(currentXml, args) {
+     xml = (0, xmlPatch_1.patchIf)(xml, args.data_type, (x, val) => (0, xmlPatch_1.patchXmlElement)(x, 'dtel:dataType', val));
+     xml = (0, xmlPatch_1.patchIf)(xml, args.length, (x, val) => (0, xmlPatch_1.patchXmlElement)(x, 'dtel:dataTypeLength', String(val).padStart(6, '0')));
+     xml = (0, xmlPatch_1.patchIf)(xml, args.decimals, (x, val) => (0, xmlPatch_1.patchXmlElement)(x, 'dtel:dataTypeDecimals', String(val).padStart(6, '0')));
+-    // Labels
++    // Labels — only change label text, leave fieldLength untouched
+     if (args.short_label !== undefined) {
+         xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:shortFieldLabel', args.short_label);
+-        xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:shortFieldLength', String(args.short_label.length || 10));
+     }
+     if (args.medium_label !== undefined) {
+         xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:mediumFieldLabel', args.medium_label);
+-        xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:mediumFieldLength', String(args.medium_label.length || 20));
+     }
+     if (args.long_label !== undefined) {
+         xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:longFieldLabel', args.long_label);
+-        xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:longFieldLength', String(args.long_label.length || 40));
+     }
+     if (args.heading_label !== undefined) {
+         xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:headingFieldLabel', args.heading_label);
+-        xml = (0, xmlPatch_1.patchXmlElement)(xml, 'dtel:headingFieldLength', String(args.heading_label.length || 55));
+     }
+     // Optional fields
+     if (args.search_help !== undefined) {
+@@ -164,14 +166,28 @@ async function updateDataElement(connection, params, lockHandle, logger) {
+         throw new Error('Package name is required');
+     }
+     const dataElementNameEncoded = (0, internalUtils_1.encodeSapObjectName)(params.data_element_name.toLowerCase());
+-    // 1. GET current XML
+-    const currentResponse = await connection.makeAdtRequest({
++    // 1. GET current XML — detect masterLanguage and logon language
++    const getResponse0 = await connection.makeAdtRequest({
+         url: `/sap/bc/adt/ddic/dataelements/${dataElementNameEncoded}`,
+         method: 'GET',
+         timeout: (0, timeouts_1.getTimeout)('default'),
+         headers: { Accept: contentTypes_1.ACCEPT_DATA_ELEMENT },
+     });
+-    const currentXml = (0, xmlPatch_1.extractXmlString)(currentResponse.data);
++    const rawXml = (0, xmlPatch_1.extractXmlString)(getResponse0.data);
++    const masterMatch = rawXml.match(/adtcore:masterLanguage="([^"]*)"/);
++    const masterLang = masterMatch ? masterMatch[1] : 'EN';
++    const logonMatch = rawXml.match(/adtcore:language="([^"]*)"/);
++    const logonLang = logonMatch ? logonMatch[1] : masterLang;
++    // Re-GET with master language so XML has proper language context
++    const currentResponse = await connection.makeAdtRequest({
++        url: `/sap/bc/adt/ddic/dataelements/${dataElementNameEncoded}?sap-language=${masterLang}`,
++        method: 'GET',
++        timeout: (0, timeouts_1.getTimeout)('default'),
++        headers: { Accept: contentTypes_1.ACCEPT_DATA_ELEMENT },
++    });
++    let currentXml = (0, xmlPatch_1.extractXmlString)(currentResponse.data);
++    // Force adtcore:language to master language
++    currentXml = currentXml.replace(/adtcore:language="[^"]*"/, `adtcore:language="${masterLang}"`);
+     // 2. Patch only changed fields
+     const updatedXml = patchDataElementXml(currentXml, params);
+     // Debug: log XML when DEBUG_ADT_LIBS is enabled
+@@ -197,22 +213,40 @@ async function updateDataElement(connection, params, lockHandle, logger) {
+             logger?.debug?.(updatedXml);
+         }
+     }
+-    // 3. PUT
++    // 3. PUT with master language (saves labels in master language)
+     const corrNrParam = params.transport_request
+         ? `&corrNr=${params.transport_request}`
+         : '';
+-    const url = `/sap/bc/adt/ddic/dataelements/${dataElementNameEncoded}?lockHandle=${encodeURIComponent(lockHandle)}${corrNrParam}`;
+     const headers = {
+         Accept: contentTypes_1.ACCEPT_DATA_ELEMENT,
+         'Content-Type': 'application/vnd.sap.adt.dataelements.v2+xml; charset=utf-8',
+     };
+-    return connection.makeAdtRequest({
+-        url,
++    const urlMaster = `/sap/bc/adt/ddic/dataelements/${dataElementNameEncoded}?lockHandle=${encodeURIComponent(lockHandle)}${corrNrParam}&sap-language=${masterLang}`;
++    const putResponse = await connection.makeAdtRequest({
++        url: urlMaster,
+         method: 'PUT',
+         timeout: (0, timeouts_1.getTimeout)('default'),
+         data: updatedXml,
+         headers,
+     });
++    // 4. If logon language differs from master, do a second PUT for logon language labels
++    if (logonLang !== masterLang) {
++        try {
++            const logonXml = updatedXml.replace(/adtcore:language="[^"]*"/, `adtcore:language="${logonLang}"`);
++            const urlLogon = `/sap/bc/adt/ddic/dataelements/${dataElementNameEncoded}?lockHandle=${encodeURIComponent(lockHandle)}${corrNrParam}&sap-language=${logonLang}`;
++            await connection.makeAdtRequest({
++                url: urlLogon,
++                method: 'PUT',
++                timeout: (0, timeouts_1.getTimeout)('default'),
++                data: logonXml,
++                headers,
++            });
++        } catch (e) {
++            // Log but don't fail — master language labels are already saved
++            logger?.warn?.('Failed to save labels in logon language:', e?.message || e);
++        }
++    }
++    return putResponse;
+ }
+ /**
+  * @deprecated Use updateDataElement directly. Kept for backward compatibility.
+diff --git a/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/AdtFunctionModule.js b/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/AdtFunctionModule.js
+index af89c0c..d228ace 100644
+--- a/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/AdtFunctionModule.js
++++ b/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/AdtFunctionModule.js
+@@ -29,6 +29,7 @@ const lock_1 = require("./lock");
+ const read_1 = require("./read");
+ const unlock_1 = require("./unlock");
+ const update_1 = require("./update");
++const contentTypes_1 = require("../../constants/contentTypes");
+ const validation_1 = require("./validation");
+ class AdtFunctionModule {
+     connection;
+@@ -84,6 +85,7 @@ class AdtFunctionModule {
+                 description: config.description,
+                 masterSystem: config.masterSystem ?? this.systemContext.masterSystem,
+                 responsible: config.responsible ?? this.systemContext.responsible,
++                processingType: config.processingType,
+             });
+             objectCreated = true;
+             state.createResult = createResult;
+@@ -469,5 +471,58 @@ class AdtFunctionModule {
+             errors: [],
+         };
+     }
++    /**
++     * Update function module metadata (e.g. processingType)
++     * Locks, GETs metadata XML, modifies it, PUTs it back, unlocks, activates
++     */
++    async updateMetadata(config, metadataUpdates) {
++        if (!config.functionModuleName || !config.functionGroupName) {
++            throw new Error('Function module name and function group name are required');
++        }
++        let lockHandle;
++        try {
++            // 1. Lock
++            this.connection.setSessionType('stateful');
++            lockHandle = await (0, lock_1.lockFunctionModule)(this.connection, config.functionGroupName, config.functionModuleName);
++            this.connection.setSessionType('stateless');
++            // 2. GET current metadata
++            const metaResult = await (0, read_1.getFunctionMetadata)(this.connection, config.functionModuleName, config.functionGroupName);
++            let metadataXml = typeof metaResult.data === 'string' ? metaResult.data : String(metaResult.data);
++            // 3. Strip atom:link elements and containerRef (read-only on PUT)
++            metadataXml = metadataXml.replace(/<atom:link[^>]*\/>/g, '');
++            metadataXml = metadataXml.replace(/<adtcore:containerRef[^>]*\/>/g, '');
++            // 4. Apply updates
++            if (metadataUpdates.processingType) {
++                metadataXml = metadataXml.replace(/fmodule:processingType="[^"]*"/, `fmodule:processingType="${metadataUpdates.processingType}"`);
++            }
++            // 5. PUT updated metadata
++            await (0, update_1.updateMetadata)(this.connection, {
++                functionModuleName: config.functionModuleName,
++                functionGroupName: config.functionGroupName,
++                lockHandle,
++                metadataXml,
++                transportRequest: config.transportRequest,
++            });
++            // 5. Unlock
++            this.connection.setSessionType('stateful');
++            await (0, unlock_1.unlockFunctionModule)(this.connection, config.functionGroupName, config.functionModuleName, lockHandle);
++            this.connection.setSessionType('stateless');
++            lockHandle = undefined;
++            // 6. Activate
++            const activateResponse = await (0, activation_1.activateFunctionModule)(this.connection, config.functionGroupName, config.functionModuleName);
++            return { updateResult: activateResponse, errors: [] };
++        }
++        catch (error) {
++            if (lockHandle) {
++                try {
++                    this.connection.setSessionType('stateful');
++                    await (0, unlock_1.unlockFunctionModule)(this.connection, config.functionGroupName, config.functionModuleName, lockHandle);
++                    this.connection.setSessionType('stateless');
++                }
++                catch (e) { /* ignore */ }
++            }
++            throw error;
++        }
++    }
+ }
+ exports.AdtFunctionModule = AdtFunctionModule;
+diff --git a/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/create.js b/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/create.js
+index d5bb751..98de7e8 100644
+--- a/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/create.js
++++ b/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/create.js
+@@ -22,8 +22,9 @@ async function create(connection, params) {
+         ? ` adtcore:masterSystem="${masterSystem}"`
+         : '';
+     const responsibleAttr = username ? ` adtcore:responsible="${username}"` : '';
++    const processingTypeAttr = params.processingType ? ` fmodule:processingType="${params.processingType}"` : '';
+     const xmlPayload = `<?xml version="1.0" encoding="UTF-8"?>
+-<fmodule:abapFunctionModule xmlns:fmodule="http://www.sap.com/adt/functions/fmodules" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:description="${limitedDescription}" adtcore:name="${params.functionModuleName}" adtcore:type="FUGR/FF"${masterSystemAttr}${responsibleAttr}>
++<fmodule:abapFunctionModule xmlns:fmodule="http://www.sap.com/adt/functions/fmodules" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:description="${limitedDescription}" adtcore:name="${params.functionModuleName}" adtcore:type="FUGR/FF"${masterSystemAttr}${responsibleAttr}${processingTypeAttr}>
+   <adtcore:containerRef adtcore:name="${params.functionGroupName}" adtcore:type="FUGR/F" adtcore:uri="/sap/bc/adt/functions/groups/${encodedGroupName}"/>
+ </fmodule:abapFunctionModule>`;
+     return connection.makeAdtRequest({
+diff --git a/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/update.js b/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/update.js
+index a7ac878..c78766a 100644
+--- a/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/update.js
++++ b/node_modules/@mcp-abap-adt/adt-clients/dist/core/functionModule/update.js
+@@ -4,6 +4,7 @@
+  */
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.update = update;
++exports.updateMetadata = updateMetadata;
+ const contentTypes_1 = require("../../constants/contentTypes");
+ const internalUtils_1 = require("../../utils/internalUtils");
+ const timeouts_1 = require("../../utils/timeouts");
+@@ -33,3 +34,26 @@ async function update(connection, params, contentTypes) {
+     });
+     return response;
+ }
++/**
++ * Update function module metadata (e.g. processingType)
++ * PUTs XML to the FM root URL (not /source/main)
++ */
++async function updateMetadata(connection, params) {
++    const encodedGroupName = (0, internalUtils_1.encodeSapObjectName)(params.functionGroupName).toLowerCase();
++    const encodedModuleName = (0, internalUtils_1.encodeSapObjectName)(params.functionModuleName).toLowerCase();
++    let url = `/sap/bc/adt/functions/groups/${encodedGroupName}/fmodules/${encodedModuleName}?lockHandle=${encodeURIComponent(params.lockHandle)}`;
++    if (params.transportRequest) {
++        url += `&corrNr=${params.transportRequest}`;
++    }
++    const response = await connection.makeAdtRequest({
++        url,
++        method: 'PUT',
++        timeout: (0, timeouts_1.getTimeout)('default'),
++        data: params.metadataXml,
++        headers: {
++            'Content-Type': 'application/vnd.sap.adt.functions.fmodules.v3+xml',
++            Accept: 'application/vnd.sap.adt.functions.fmodules.v3+xml',
++        },
++    });
++    return response;
++}
+diff --git a/node_modules/@mcp-abap-adt/adt-clients/dist/utils/activationUtils.js b/node_modules/@mcp-abap-adt/adt-clients/dist/utils/activationUtils.js
+index de3c716..840ae4b 100644
+--- a/node_modules/@mcp-abap-adt/adt-clients/dist/utils/activationUtils.js
++++ b/node_modules/@mcp-abap-adt/adt-clients/dist/utils/activationUtils.js
+@@ -42,6 +42,8 @@ function buildObjectUri(name, type, parentName) {
+         case 'PROG/P':
+         case 'PROG':
+             return `/sap/bc/adt/programs/programs/${lowerName}`;
++        case 'PROG/I':
++            return `/sap/bc/adt/programs/includes/${lowerName}`;
+         case 'FUGR/FF': {
+             if (parentName) {
+                 const lowerParent = (0, internalUtils_1.encodeSapObjectName)(parentName).toLowerCase();
