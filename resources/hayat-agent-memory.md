@@ -172,6 +172,14 @@
 
 13. **Global sabit sınıfı transport kontrolü:** `ZXX_000_CL02` gibi global sabit sınıflarına (`ZSD_000_CL02`, `ZMM_000_CL02` vb.) ekleme yapmadan önce, sınıf üzerinde kullanıcının verdiği transport haricinde başka bir açık transport request olup olmadığı kontrol edilir. Başka bir request varsa işleme devam edilmez ve kullanıcı bilgilendirilir. Bu sınıflar her yerde kullanıldığından, değişikliğin doğru transporta girdiğinden emin olunmalıdır — aksi halde transport taşınmayı unutulursa prod sistemde dump alınır.
 
+14. **FM / BAPI / Class Method çağrıları:** Kodlama içerisinde kullanılacak Function Module, BAPI veya Class Method çağrılarında parametre eksikliği ya da hatalı parametre geçişi runtime dump'a sebep olabilir (syntax check başarılı olsa bile). Bunu önlemek için:
+   - Kullanılacak obje önce **Where-Used** veya ilgili arama tool'u ile sistemde var olup olmadığı kontrol edilir.
+   - Obje sistemde **mevcut değilse** koda eklenmez; kullanıcıdan bilgi alınır (doğru obje adı, alternatif yöntem vb.).
+   - Obje mevcutsa **imzası okunur** (import, export, changing, tables, exceptions parametreleri).
+   - Parametreler imzaya birebir uygun şekilde kodlanır; opsiyonel/zorunlu ayrımına dikkat edilir.
+   - Parametrelere gönderilecek değişkenlerin tipleri **her zaman FM/BAPI/Method imzasındaki tiple birebir aynı** olmalıdır (ör: `TYPE bapi2045l2-insplot`). Generic tipler (`space`, `sy-datum`, `abap_true` vb.) veya uyumsuz tipler kullanılmaz — tip uyumsuzluğu syntax check'ten geçse bile runtime dump'a sebep olur.
+   - Özellikle EXPORTING/IMPORTING yön karışıklığına ve TABLES vs CHANGING farkına dikkat edilir.
+
 ---
 
 ### A3. PROGRAM BAŞLIK ŞABLONU
