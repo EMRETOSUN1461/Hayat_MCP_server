@@ -8,7 +8,11 @@
    - Oluşturulacak nesnelerin tam listesini kullanıcıya gösterir ve **tek bir onay** alır.
    - Onay aldıktan sonra tüm nesneleri art arda oluşturur. **Her nesne için ayrı ayrı onay istemez.**
 4. **Oluşturduğu kodun standartlara uygunluğunu kendi kontrol eder:** prefix'ler, SY-DATLO kullanımı, hardcode olup olmadığı, IF FOUND ibaresi vb.
-5. **Standart tablolara doğrudan SQL yazmaz.** Standart SAP tablolarına INSERT/UPDATE/DELETE/MODIFY yazmak yerine uygun BAPI/FM/sınıf arar. Bulamazsa kullanıcıyı bilgilendirir ve o tabloya müdahale etmez. Z/Y tabloları bu ku# HAYAT HOLDİNG — S/4HANA ABAP GELİŞTİRME AGENT KURALLARI
+5. **Standart tablolara doğrudan SQL yazmaz.** Standart SAP tablolarına INSERT/UPDATE/DELETE/MODIFY yazmak yerine uygun BAPI/FM/sınıf arar. Bulamazsa kullanıcıyı bilgilendirir ve o tabloya müdahale etmez. Z/Y tabloları bu kurala dahil değildir.
+6. **Güncelleme sonrası doğrulama yapar.** Agent bir sınıfı veya nesneyi güncelledikten sonra, kritik değerlerin (enhancement ID, sabit değerleri, parametre adları vb.) doğru yazıldığını `GetClass`/`ReadClass` ile okuyarak doğrular. Kullanıcının verdiği değerler (BADI_EXXX numaraları, transport numaraları vb.) birebir eşleşmelidir — tahmin veya hafızadan yazılmamalı, kullanıcının mesajından kopyalanmalıdır.
+7. **BAdI/Exit implementasyonlarında ZBCENH design pattern'ini uygular.** BAdI veya exit metotlarına doğrudan kod yazmaz. Her zaman A5 bölümündeki "BAdI/Exit İmplementasyon İş Akışı" design pattern'ini takip eder: bilgi toplama → ön kontroller (interface tipleri, transport kilidi, hardcode tarama) → uygulama sınıfı oluşturma → BAdI sınıfını include pattern'e çevirme → doğrulama.
+
+# HAYAT HOLDİNG — S/4HANA ABAP GELİŞTİRME AGENT KURALLARI
 
 > Bu doküman MCP agent'ın memory'sinde kalıcı olarak tutulacak kural setidir.
 > İki ana bölümden oluşur: (A) Sabit kurallar, (B) Her geliştirmede kullanıcıya sorulacak bilgiler, (C) Gerçek sistem örnekleri.
@@ -166,6 +170,8 @@
 
 12. **Standart tablolara doğrudan müdahale yasağı:** Standart SAP tablolarına (MARA, VBAK, EKKO, LIKP, BKPF vb.) doğrudan `INSERT`, `UPDATE`, `DELETE`, `MODIFY` statement'ları yazılmaz. Güncelleme işlemleri mutlaka standart BAPI, Function Module veya SAP sınıfları aracılığıyla yapılır. Eğer ilgili işlem için standart bir BAPI/FM/sınıf yoksa, agent standart tabloya doğrudan müdahale etmez ve durumu kullanıcıya bildirir. Bu kural yalnızca standart tablolar için geçerlidir; Z/Y tabloları için doğrudan INSERT/UPDATE/DELETE/MODIFY kullanılabilir.
 
+13. **Global sabit sınıfı transport kontrolü:** `ZXX_000_CL02` gibi global sabit sınıflarına (`ZSD_000_CL02`, `ZMM_000_CL02` vb.) ekleme yapmadan önce, sınıf üzerinde kullanıcının verdiği transport haricinde başka bir açık transport request olup olmadığı kontrol edilir. Başka bir request varsa işleme devam edilmez ve kullanıcı bilgilendirilir. Bu sınıflar her yerde kullanıldığından, değişikliğin doğru transporta girdiğinden emin olunmalıdır — aksi halde transport taşınmayı unutulursa prod sistemde dump alınır.
+
 ---
 
 ### A3. PROGRAM BAŞLIK ŞABLONU
@@ -288,6 +294,43 @@ ENHANCEMENT 1  ZSD_000_ENHA_IM31.    "active version
   INCLUDE ZSD_000_ENHA_E051_I01 IF FOUND.
 ENDENHANCEMENT.
 ```
+
+#### BAdI/Exit İmplementasyon İş Akışı (Design Pattern)
+
+Mevcut bir BAdI/exit sınıfında doğrudan kod varsa veya yeni bir BAdI/exit implemente edilecekse, agent aşağıdaki iş akışını uygular:
+
+**1. Bilgi toplama — kullanıcıdan al:**
+- Enhancement ID (`BADI_EXXX` / `EXIT_EXXX`)
+- Uygulama sınıfı adı (`ZXX_000_BADI_EXXX_CL01`)
+- Transport request numarası
+
+**2. Ön kontroller:**
+- BAdI interface'ini oku → parametre adlarını ve tiplerini tespit et (`IS_xxx type ???`, `CS_xxx type ???`)
+- Global sabit sınıfında (`ZXX_000_CL02`) açık transport kontrolü yap → başka request varsa dur, kullanıcıyı bilgilendir
+- Mevcut kodda hardcode var mı kontrol et → sabit sınıfında karşılığı yoksa yeni sabit ekle
+
+**3. Uygulama sınıfını oluştur (`ZXX_000_BADI_EXXX_CL01`):**
+- `ZBC_ENH_IF01` interface'ini implemente et
+- `~CONTROL` metodu (ön kontrol, gerekmedikçe boş bırakılır)
+- `~EXECUTE` metodu:
+  - Parametreleri `co_base->get_param('PARAM_ADI')` ile al, `FIELD-SYMBOLS`'a ata
+  - Atama kontrolü yap (`CHECK <fs> IS ASSIGNED`)
+  - İş mantığını yaz
+  - Hardcode yerine sabit sınıfı referansları kullan (`zxx_000_cl02=>gc_xxx`)
+  - Tek seferlik sabitler (RFC kullanıcı adları vb.) sınıfın kendi attribute'larına yazılabilir
+
+**4. BAdI/Exit sınıfını güncelle:**
+- Metot içindeki tüm iş mantığını kaldır
+- Yerine include pattern'i koy:
+```abap
+constants lc_exit_enhid type zbc_enh_t01_e01 value 'BADI_EXXX'.
+include zbc_enh_i02.
+```
+
+**5. Doğrulama:**
+- Her iki sınıfı da `GetClass`/`ReadClass` ile oku
+- Enhancement ID'nin (`BADI_EXXX`) kullanıcının verdiği değerle birebir eşleştiğini doğrula
+- Aktivasyon başarılı mı kontrol et
 
 #### AMDP BAdI'lerde
 Custom exit yapısı kullanılamaz. BADI_A001 şeklinde raporlama kaydı yapılır, uygulayan sınıf adı boş bırakılır.
