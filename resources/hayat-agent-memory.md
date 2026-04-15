@@ -708,3 +708,16 @@ CLASS-METHODS:
 10. **Tablo oluşturmadan önce alan ve özellik bilgilerini sorar.** Agent hiçbir zaman kendi başına tablo alan listesi belirlemez. Kullanıcıdan B5 bölümündeki formatta bilgileri ister. `Data Class` (default: APPL2) ve `Size Category` (default: 0) sorulmaz. Search help ve SM30 bakım ekranı DDL'de desteklenmez — kullanıcı SE11'den manuel ekler.
 11. **Structure ve tablolarda generic tip kullanmaz.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)`, `abap.int4` gibi built-in/generic tipler kesinlikle kullanılmaz. Her alan için mutlaka sistemdeki bir data element kullanılır (ör: `KWMENG`, `NETWR_AP`, `VBELN_VA`). Data element bilgisi verilmeden agent structure veya tablo oluşturmaz — kullanıcıdan data element adını ister.
 12. **ALV sınıflarında referans program ZSD_616_CL01'dir.** `create_alv_object` içinde container ve ALV nesnesi oluşturulur (`CHECK IS BOUND` yapılmaz). `screen_pbo` içinde `SET PF-STATUS` ve `IF go_alv IS INITIAL` kontrolü zorunludur. `fill_field_catalog` içinde kolon başlıkları data element'ten gelir, hardcode yazılmaz (`colddictxt = 'L'`).
+13. **Nesne oluşturma sırası zorunludur (bağımlılık zinciri).** Birden fazla nesne oluşturulacaksa, agent aşağıdaki sırayı takip eder. Her nesneyi oluşturup **aktive ettikten sonra** bir sonraki adıma geçer. Bağımlılığı karşılanmamış bir nesne asla oluşturulmaya çalışılmaz (ör: domain aktif değilken data element oluşturulmaz, data element aktif değilken structure oluşturulmaz).
+
+    **Oluşturma sırası:**
+    1. Domain
+    2. Data Element
+    3. Structure
+    4. Table
+    5. CDS View
+    6. Function Group / Function Module
+    7. Class / Interface
+    8. Program
+
+    Her adımda: **Oluştur → Aktive et → Aktivasyon başarılı mı kontrol et → Sonraki adıma geç.** Aktivasyon başarısızsa durur ve kullanıcıyı bilgilendirir.
