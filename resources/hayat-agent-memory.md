@@ -580,6 +580,36 @@ ENDMETHOD.
 - `set_table_for_first_display` çağrısında `is_variant` ve `i_save = 'A'` parametreleri layout kaydetme desteği sağlar
 - Basit ALV raporlarında SET HANDLER (hotspot, double_click, toolbar, user_command) eklenmez, sadece gerektiğinde eklenir
 
+#### ZBC_000_IF01 ALV Event Metotları Kullanım Kılavuzu
+
+Agent, ALV raporlarında aşağıdaki senaryolarda ilgili interface metodunu kullanır. Aynı iş için private metot oluşturmaz; tüm ALV event işlemleri interface metotları üzerinden yapılır.
+
+| Senaryo | Metot | Açıklama |
+|---|---|---|
+| Toolbar'dan buton gizleme | `~EXCLUDE_BUTTONS` | ALV standart toolbar'ından gösterilmemesi istenen butonları çıkarır. `rt_exc_buttons` return tablosuna ekle. |
+| Toolbar'a yeni buton ekleme | `~ALV_TOOLBAR` | ALV toolbar'ına custom buton ekler. `e_object->mt_toolbar` tablosuna `stb_button` satırları APPEND edilir. |
+| Custom buton tıklama işlemi | `~ALV_USER_COMMAND` | `~ALV_TOOLBAR` ile eklenen butonların `e_ucomm` değerine göre iş mantığı çalıştırır. |
+| GUI Status buton işlemi | `~USER_COMMAND` | PF-STATUS'e (GUI Status) eklenen butonların `iv_ucomm` değerine göre iş mantığı çalıştırır. ALV toolbar butonu değilse bu metot kullanılır. |
+| Hotspot tıklama | `~ALV_HOTSPOT_CLICK` | `fill_field_catalog` içinde bir alana `hotspot = abap_true` atandıktan sonra, o alana tıklandığında çalışacak iş mantığı bu metoda yazılır. `e_row_id`, `e_column_id` parametreleri ile tıklanan hücre belirlenir. |
+| Çift tıklama | `~ALV_DOUBLE_CLICK` | ALV'de bir satıra çift tıklandığında çalışacak iş mantığı bu metoda yazılır. `e_row`, `e_column` parametreleri ile tıklanan hücre belirlenir. |
+| Buton tipi alan tıklama | `~ALV_BUTTON_CLICK` | `fill_field_catalog` içinde bir alana `style = cl_gui_alv_grid=>mc_style_button` atandıktan sonra, o butona tıklandığında çalışacak iş mantığı bu metoda yazılır. |
+| Hücre değişikliği | `~ALV_DATA_CHANGED` | ALV editable modda iken hücre değeri değiştiğinde tetiklenir. Validasyon ve hesaplama mantığı bu metoda yazılır. `er_data_changed` parametresi ile değişen hücrelere erişim sağlanır. |
+| Değişiklik tamamlama | `~ALV_DATA_CHANGED_FINISHED` | `~ALV_DATA_CHANGED` işlemi tamamlandıktan sonra tetiklenir. Değişiklik sonrası toplam hesaplama veya ekran güncelleme gibi işlemler için kullanılır. |
+
+**Event handler kaydı:** Kullanılan her event metodu için `create_alv_object` metodunda `set_table_for_first_display` çağrısından SONRA `SET HANDLER` ile kayıt yapılır:
+```abap
+SET HANDLER me->zbc_000_if01~alv_toolbar FOR zbc_000_if01~go_alv.
+SET HANDLER me->zbc_000_if01~alv_user_command FOR zbc_000_if01~go_alv.
+" Diğer event'ler için de aynı pattern:
+" SET HANDLER me->zbc_000_if01~alv_hotspot_click FOR zbc_000_if01~go_alv.
+" SET HANDLER me->zbc_000_if01~alv_double_click FOR zbc_000_if01~go_alv.
+" SET HANDLER me->zbc_000_if01~alv_button_click FOR zbc_000_if01~go_alv.
+" SET HANDLER me->zbc_000_if01~alv_data_changed FOR zbc_000_if01~go_alv.
+" SET HANDLER me->zbc_000_if01~alv_data_changed_finished FOR zbc_000_if01~go_alv.
+```
+
+**Kural:** Agent, ALV event işlemleri için private metot tanımlamaz. Tüm event kodları doğrudan ilgili interface metoduna yazılır. İş mantığı karmaşıksa, private helper metotlar oluşturulabilir ancak event handler'ın kendisi her zaman interface metodudur.
+
 ### C2. Hayat Enhancement Exit Class (ZSD_167_ENHA_E051_CL01)
 
 ```
