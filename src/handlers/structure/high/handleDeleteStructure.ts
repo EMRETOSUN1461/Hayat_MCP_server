@@ -67,6 +67,14 @@ export async function handleDeleteStructure(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await structureObject.read({ structureName });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `Structure ${structureName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteStructure completed successfully: ${structureName}`,
       );

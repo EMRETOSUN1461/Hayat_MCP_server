@@ -77,6 +77,14 @@ export async function handleDeleteProgram(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await programObject.read({ programName });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `Program ${programName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(`✅ DeleteProgram completed successfully: ${programName}`);
 
       return return_response({

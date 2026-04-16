@@ -77,6 +77,14 @@ export async function handleDeleteInterface(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await interfaceObject.read({ interfaceName });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `Interface ${interfaceName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteInterface completed successfully: ${interfaceName}`,
       );

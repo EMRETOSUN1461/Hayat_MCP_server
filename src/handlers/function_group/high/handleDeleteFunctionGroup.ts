@@ -78,6 +78,16 @@ export async function handleDeleteFunctionGroup(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await functionGroupObject.read({
+        functionGroupName,
+      });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `FunctionGroup ${functionGroupName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteFunctionGroup completed successfully: ${functionGroupName}`,
       );

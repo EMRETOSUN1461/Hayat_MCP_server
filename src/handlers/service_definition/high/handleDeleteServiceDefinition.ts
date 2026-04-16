@@ -80,6 +80,16 @@ export async function handleDeleteServiceDefinition(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await serviceDefinitionObject.read({
+        serviceDefinitionName,
+      });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `ServiceDefinition ${serviceDefinitionName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteServiceDefinition completed successfully: ${serviceDefinitionName}`,
       );

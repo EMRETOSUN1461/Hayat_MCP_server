@@ -1,17 +1,3 @@
-## D. AGENT DAVRANIŞ KURALLARI
-
-1. **Numara tahmini yapmaz.** Her nesne numarasını (P01/P02, I01/I02, CL01/CL02, FG01/FG02, FM01/FM02, ENHA_IM31/IM32, ENHA_E051/E052, BADI_E004/E005 vb.) kullanıcıya sorar.
-2. **Sisteme gereksiz sorgu atmaz.** Sıradaki numara için SearchObject veya GetPackageContents çağırmaz.
-3. **Önce tüm bilgileri toplar, sonra tek seferde oluşturur.** Agent şu akışı izler:
-   - Geliştirme talebini anlar.
-   - Gerekli tüm bilgileri (modül, paket, nesne numaraları, transport, ek bilgiler) tek bir turda kullanıcıdan toplar.
-   - Oluşturulacak nesnelerin tam listesini kullanıcıya gösterir ve **tek bir onay** alır.
-   - Onay aldıktan sonra tüm nesneleri art arda oluşturur. **Her nesne için ayrı ayrı onay istemez.**
-4. **Oluşturduğu kodun standartlara uygunluğunu kendi kontrol eder:** prefix'ler, SY-DATLO kullanımı, hardcode olup olmadığı, IF FOUND ibaresi vb.
-5. **Standart tablolara doğrudan SQL yazmaz.** Standart SAP tablolarına INSERT/UPDATE/DELETE/MODIFY yazmak yerine uygun BAPI/FM/sınıf arar. Bulamazsa kullanıcıyı bilgilendirir ve o tabloya müdahale etmez. Z/Y tabloları bu kurala dahil değildir.
-6. **Güncelleme sonrası doğrulama yapar.** Agent bir sınıfı veya nesneyi güncelledikten sonra, kritik değerlerin (enhancement ID, sabit değerleri, parametre adları vb.) doğru yazıldığını `GetClass`/`ReadClass` ile okuyarak doğrular. Kullanıcının verdiği değerler (BADI_EXXX numaraları, transport numaraları vb.) birebir eşleşmelidir — tahmin veya hafızadan yazılmamalı, kullanıcının mesajından kopyalanmalıdır.
-7. **BAdI/Exit implementasyonlarında ZBCENH design pattern'ini uygular.** BAdI veya exit metotlarına doğrudan kod yazmaz. Her zaman A5 bölümündeki "BAdI/Exit İmplementasyon İş Akışı" design pattern'ini takip eder: bilgi toplama → ön kontroller (interface tipleri, transport kilidi, hardcode tarama) → uygulama sınıfı oluşturma → BAdI sınıfını include pattern'e çevirme → doğrulama.
-
 # HAYAT HOLDİNG — S/4HANA ABAP GELİŞTİRME AGENT KURALLARI
 
 > Bu doküman MCP agent'ın memory'sinde kalıcı olarak tutulacak kural setidir.
@@ -34,6 +20,7 @@
 - **Software Component**: `HOME` (tüm custom paketler için)
 - **Record Changes**: `true` (transportable paketler için)
 - Paket oluşturulurken bu değerler otomatik kullanılır, kullanıcıya sorulmaz.
+- Paket oluştururken kullanıcıdan sadece şunlar sorulur: **paket adı**, **üst paket (super_package)**, **transport request numarası**.
 
 #### Nesne İsimlendirme Şablonları
 
@@ -382,21 +369,20 @@ Numaralar B1'de sorulacak. Ek olarak:
 Agent, structure oluşturmadan önce **mutlaka** kullanıcıdan alan bilgilerini aşağıdaki formatta ister. Agent asla kendi başına alan listesi belirlemez.
 
 **İstenecek format:**
-```
-Structure Adı: ZXX_NNN_SNN
-Component      | Component Type | Curr/Quan Ref
----------------|---------------|------------------
-VBELN          | VBELN_VA      |
-KUNNR          | KUNAG         |
-KWMENG         | KWMENG        | VBAP-VRKME
-NETWR          | NETWR_AP      | VBAP-WAERK
-WAERK          | WAERK         |
-```
+
+| Alan Adı | Data Element | Curr/Quan Ref |
+|---|---|---|
+| VBELN | VBELN_VA | |
+| KWMENG | KWMENG | VBAP-VRKME |
+| NETWR | NETWR_AP | VBAP-WAERK |
+| WAERK | WAERK | |
+
 - `Curr/Quan Ref` kolonuna CURR/QUAN alanları için `TABLO-ALAN` formatında referans yazılır (ör: `MARA-MEINS`, `VBAP-WAERK`)
 - CURR/QUAN olmayan alanlar için boş bırakılır
 
 **Kurallar:**
-- **Her alan için mutlaka data element kullanılır.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)` gibi generic/built-in tipler kesinlikle kullanılmaz. `Component Type` kolonu boşsa agent tahmin yapmaz — kullanıcıdan data element bilgisini ister. Bu bilgi alınmadan structure oluşturulmaz.
+- **Her alan için mutlaka data element kullanılır.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)` gibi generic/built-in tipler kesinlikle kullanılmaz. `Data Element` kolonu boşsa agent tahmin yapmaz — kullanıcıdan data element bilgisini ister. Bu bilgi alınmadan structure oluşturulmaz.
+- **Alan adları ve sırası birebir korunur.** Alanlar kullanıcının verdiği isimle ve verdiği sırayla oluşturulur. Agent hiçbir alanı yeniden adlandıramaz, sırasını değiştiremez veya ekstra alan ekleyemez.
 - `Curr/Quan Ref` kolonunda referans varsa, bu bilgi DDL'de `@Semantics` annotation'ı olarak yazılır
 - **Curr/Quan Ref dış tabloya referanstır.** Birim/para birimi alanının aynı structure içinde olması gerekmez. Örneğin `MENGE` alanı `MARA-MEINS` referansı alıyorsa, MEINS alanı structure'a eklenmez — sadece annotation yazılır.
 - **`@Semantics` annotation formatı:** `TABLO-ALAN` referansı küçük harfle, tire yerine nokta ile yazılır: `MARA-MEINS` → `@Semantics.quantity.unitOfMeasure : 'mara.meins'`, `VBAP-WAERK` → `@Semantics.amount.currencyCode : 'vbap.waerk'`
@@ -408,26 +394,21 @@ WAERK          | WAERK         |
 Agent, tablo oluşturmadan önce **mutlaka** kullanıcıdan alan ve tablo özellik bilgilerini aşağıdaki formatta ister. Agent asla kendi başına alan listesi veya tablo özellikleri belirlemez.
 
 **İstenecek format:**
-```
-Tablo Adı: ZXX_NNN_TNN
-Field   | Key | Initial | Data Element | Check Table | Curr/Quan Ref
---------|-----|---------|-------------|-------------|------------------
-MANDT   | X   | X       | MANDT       | T000        |
-VBELN   | X   | X       | VBELN_VA    | VBAK        |
-KUNNR   |     |         |             |             |
-NETWR   |     |         |             |             | VBAP-WAERK
+
+| Alan Adı | Data Element | Key | Curr/Quan Ref |
+|---|---|---|---|
+| MANDT | MANDT | X | |
+| VBELN | VBELN_VA | X | |
+| NETWR | NETWR_AP | | BKPF-WAERS |
 
 Delivery Class       : C (veya A, L, G, W, S, E)
-Data Browser/Table View Editing : Display/Maintenance Allowed (veya with Restrictions, Not Allowed)
-```
-- `Data Class` ve `Size Category` sorulmaz, default olarak `APPL2` ve `0` kullanılır
+Data Maintenance     : ALLOWED (veya RESTRICTED, NOT_ALLOWED)
 
 **Kurallar:**
 - **Her alan için mutlaka data element kullanılır.** Generic/built-in tipler (`abap.char`, `abap.quan`, `abap.curr`, `abap.numc` vb.) kesinlikle kullanılmaz. `Data Element` kolonu boşsa agent tahmin yapmaz — kullanıcıdan data element bilgisini ister. Bu bilgi alınmadan tablo oluşturulmaz.
+- **Alan adları ve sırası birebir korunur.** Alanlar kullanıcının verdiği isimle ve verdiği sırayla oluşturulur. Agent hiçbir alanı yeniden adlandıramaz, sırasını değiştiremez veya ekstra alan ekleyemez.
 - **Curr/Quan Ref dış tabloya referanstır.** Birim/para birimi alanının aynı tabloda olması gerekmez. Agent kullanıcının vermediği alanı otomatik eklemez.
-- `Key` kolonunda `X` olan alanlar primary key'dir
-- `Initial` kolonunda `X` olan alanlar NOT NULL'dur
-- `Check Table` belirtilmişse DDL'de `with foreign key` ile foreign key ilişkisi oluşturulur
+- `Key` kolonunda `X` olan alanlar primary key'dir. Key alanlar otomatik olarak NOT NULL kabul edilir.
 - **Search help DDL tablo tanımında desteklenmez.** Kullanıcı search help'i SE11'den manuel ekler. Formatta search help istenmez.
 - `Curr/Quan Ref` kolonunda CURR/QUAN alanları için `TABLO-ALAN` formatında referans zorunludur (ör: `VBAP-WAERK`)
 - Agent bu bilgilerin tamamını almadan tablo oluşturmaz
@@ -452,7 +433,7 @@ Bu alan en çok numara gerektiren kısımdır. Tüm numaralar ZBCENH üzerinden 
 
 **Önemli:** Agent ZBCENH bakımı yapmaz. Developer sıradaki numarayı ZBCENH işlem kodundan kontrol edip agent'a bildirir.
 
-### B4. CDS View
+### B6. CDS View
 
 Numaralar B1'de sorulacak. Ek olarak:
 - View katmanı: General (V), Interface (VI), Consumption (VC), Extension (VE)?
@@ -460,14 +441,14 @@ Numaralar B1'de sorulacak. Ek olarak:
 - Parametre alacak mı?
 - Behaviour Definition gerekli mi?
 
-### B5. Tablo / Data Dictionary
+### B7. Tablo / Data Dictionary
 
 Numaralar B1'de sorulacak. Ek olarak:
 - Text table gerekli mi?
 - Maintenance view gerekli mi?
 - Lock object gerekli mi?
 
-### B6. Form
+### B8. Form
 
 Numaralar B1'de sorulacak. Ek olarak:
 - Form tipi: Smartform, Adobe Form, SAPScript?
@@ -711,10 +692,10 @@ CLASS-METHODS:
 5. **Birden fazla nesne oluşturulacaksa** (ör: exit class + include + ZBCENH kaydı), tüm nesne listesini ve numaralarını önceden kullanıcıya onaylatır.
 6. **Standart tablolara doğrudan SQL yazmaz.** Standart SAP tablolarına INSERT/UPDATE/DELETE/MODIFY yazmak yerine uygun BAPI/FM/sınıf arar. Bulamazsa kullanıcıyı bilgilendirir ve o tabloya müdahale etmez. Z/Y tabloları bu kuraldan muaftır.
 7. **Transport numarasını her zaman sorar.** Nesne oluşturmaya veya değiştirmeye başlamadan önce kullanılacak transport request numarasını kullanıcıdan alır.
-8. **Alt paket yoksa önce oluşturur.** Nesne oluşturmaya başlamadan önce hedef alt paketin (ZXX_NNN) var olup olmadığını kontrol eder. Yoksa `CreatePackage` ile oluşturur ve aktive eder. Bu adımı kullanıcıya sormadan otomatik yapar.
-9. **Structure oluşturmadan önce alan bilgilerini sorar.** Agent hiçbir zaman kendi başına structure alan listesi belirlemez. Kullanıcıdan B4 bölümündeki formatta alan bilgilerini ister. CURR/QUAN alanları için `Curr/Quan Ref` kolonunda `TABLO-ALAN` formatında referans zorunludur.
-10. **Tablo oluşturmadan önce alan ve özellik bilgilerini sorar.** Agent hiçbir zaman kendi başına tablo alan listesi belirlemez. Kullanıcıdan B5 bölümündeki formatta bilgileri ister. `Data Class` (default: APPL2) ve `Size Category` (default: 0) sorulmaz. Search help ve SM30 bakım ekranı DDL'de desteklenmez — kullanıcı SE11'den manuel ekler.
-11. **Structure ve tablolarda generic tip kullanmaz.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)`, `abap.int4` gibi built-in/generic tipler kesinlikle kullanılmaz. Her alan için mutlaka sistemdeki bir data element kullanılır (ör: `KWMENG`, `NETWR_AP`, `VBELN_VA`). Data element bilgisi verilmeden agent structure veya tablo oluşturmaz — kullanıcıdan data element adını ister.
+8. **Alt paket yoksa önce oluşturur.** Nesne oluşturmaya başlamadan önce hedef alt paketin (ZXX_NNN) var olup olmadığını kontrol eder. Yoksa `CreatePackage` ile oluşturur ve aktive eder. Bu adımı kullanıcıya sormadan otomatik yapar. Paket oluştururken yalnızca şunları sorar: paket adı, üst paket (super_package), transport request. Transport Layer (ZS4D), Software Component (HOME), Record Changes (true) otomatik kullanılır — kullanıcıya sorulmaz.
+9. **Structure oluşturmadan önce alan bilgilerini sorar.** Agent hiçbir zaman kendi başına structure alan listesi belirlemez. Kullanıcıdan B4 bölümündeki `Alan Adı | Data Element | Curr/Quan Ref` formatında alan bilgilerini ister. CURR/QUAN alanları için `Curr/Quan Ref` kolonunda `TABLO-ALAN` formatında referans zorunludur.
+10. **Tablo oluşturmadan önce alan ve özellik bilgilerini sorar.** Agent hiçbir zaman kendi başına tablo alan listesi belirlemez. Kullanıcıdan B5 bölümündeki `Alan Adı | Data Element | Key | Curr/Quan Ref` formatında bilgileri ister. Search help ve SM30 bakım ekranı DDL'de desteklenmez — kullanıcı SE11'den manuel ekler.
+11. **Structure ve tablolarda generic tip kullanmaz; alanları verilen isim ve sırayla oluşturur.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)`, `abap.int4` gibi built-in/generic tipler kesinlikle kullanılmaz. Her alan için mutlaka sistemdeki bir data element kullanılır (ör: `KWMENG`, `NETWR_AP`, `VBELN_VA`). Data element bilgisi verilmeden agent structure veya tablo oluşturmaz — kullanıcıdan data element adını ister. Alanlar kullanıcının verdiği isimle ve verdiği sırayla oluşturulur; agent hiçbir alanı yeniden adlandıramaz, sırasını değiştiremez veya kendi başına ekstra alan ekleyemez.
 12. **ALV sınıflarında referans program ZSD_616_CL01'dir.** `create_alv_object` içinde container ve ALV nesnesi oluşturulur (`CHECK IS BOUND` yapılmaz). `screen_pbo` içinde `SET PF-STATUS` ve `IF go_alv IS INITIAL` kontrolü zorunludur. `fill_field_catalog` içinde kolon başlıkları data element'ten gelir, hardcode yazılmaz (`colddictxt = 'L'`).
 13. **Nesne oluşturma sırası zorunludur (bağımlılık zinciri).** Birden fazla nesne oluşturulacaksa, agent aşağıdaki sırayı takip eder. Her nesneyi oluşturup **aktive ettikten sonra** bir sonraki adıma geçer. Bağımlılığı karşılanmamış bir nesne asla oluşturulmaya çalışılmaz (ör: domain aktif değilken data element oluşturulmaz, data element aktif değilken structure oluşturulmaz).
 

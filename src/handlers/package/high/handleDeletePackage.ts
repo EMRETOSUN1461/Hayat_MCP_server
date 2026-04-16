@@ -66,7 +66,8 @@ export async function handleDeletePackage(
 
     try {
       // Delete package using AdtClient
-      const deleteState = await client.getPackage().delete({
+      const packageObject = client.getPackage();
+      const deleteState = await packageObject.delete({
         packageName,
         transportRequest: transport_request,
       });
@@ -74,6 +75,14 @@ export async function handleDeletePackage(
       if (!deleteState || !deleteState.deleteResult) {
         throw new Error(
           `Delete did not return a response for package ${packageName}`,
+        );
+      }
+
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await packageObject.read({ packageName });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `Package ${packageName} deletion reported success but the object still exists. Check transport locks and permissions.`,
         );
       }
 

@@ -1,8 +1,9 @@
 /**
  * CreateTable Handler - ABAP Table Creation via ADT API
  *
- * Workflow: validate -> create (object in initial state)
- * DDL code is set via UpdateTable handler.
+ * Workflow: validate -> create -> lock -> update DDL -> unlock -> activate
+ * If fields are provided, generates DDL automatically.
+ * If no fields, creates table in initial state (use UpdateTable to set DDL).
  */
 
 import { createAdtClient } from '../../../lib/clients';
@@ -13,6 +14,7 @@ import {
   McpError,
   return_error,
   return_response,
+  safeCheckOperation,
 } from '../../../lib/utils';
 import { validateTransportRequest } from '../../../utils/transportValidation.js';
 
@@ -42,16 +44,84 @@ export const TOOL_DEFINITION = {
         description:
           'Transport request number (e.g., E19K905635). Required for transportable packages.',
       },
+      table_category: {
+        type: 'string',
+        description:
+          'Table category: TRANSPARENT (default), STRUCTURE, GLOBAL_TEMPORARY, etc.',
+        default: 'TRANSPARENT',
+      },
+      delivery_class: {
+        type: 'string',
+        description:
+          'Delivery class: A (Application, default), C (Customizing), L (Temporary), G (Customer), E (Control), S (System), W (System/no import).',
+        default: 'A',
+      },
+      data_maintenance: {
+        type: 'string',
+        description:
+          'Data maintenance: RESTRICTED (default), ALLOWED, NOT_ALLOWED.',
+        default: 'RESTRICTED',
+      },
+      fields: {
+        type: 'array',
+        description: 'Array of table fields with data element references',
+        items: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Field name (e.g., MANDT, VBELN)',
+            },
+            data_element: {
+              type: 'string',
+              description: 'Data element name (e.g., MANDT, VBELN_VA)',
+            },
+            key: {
+              type: 'boolean',
+              description: 'Is this a key field? Default: false',
+            },
+            not_null: {
+              type: 'boolean',
+              description:
+                'NOT NULL constraint. Default: true for key fields, false for others.',
+            },
+            curr_quan_ref: {
+              type: 'string',
+              description:
+                'Currency/quantity reference in TABLE-FIELD format (e.g., BKPF-WAERS). Required for CURR/QUAN type fields.',
+            },
+          },
+          required: ['name', 'data_element'],
+        },
+      },
+      activate: {
+        type: 'boolean',
+        description:
+          'Activate table after creation. Default: true. Only applicable when fields are provided.',
+      },
     },
     required: ['table_name', 'package_name'],
   },
 } as const;
+
+interface TableField {
+  name: string;
+  data_element: string;
+  key?: boolean;
+  not_null?: boolean;
+  curr_quan_ref?: string;
+}
 
 interface CreateTableArgs {
   table_name: string;
   description?: string;
   package_name: string;
   transport_request?: string;
+  table_category?: string;
+  delivery_class?: string;
+  data_maintenance?: string;
+  fields?: TableField[];
+  activate?: boolean;
 }
 
 /**
@@ -80,6 +150,11 @@ export async function handleCreateTable(
     );
 
     const tableName = createTableArgs.table_name.toUpperCase();
+    const hasFields =
+      createTableArgs.fields &&
+      Array.isArray(createTableArgs.fields) &&
+      createTableArgs.fields.length > 0;
+    const shouldActivate = hasFields && createTableArgs.activate !== false;
 
     logger?.info(`Starting table creation: ${tableName}`);
 
@@ -105,13 +180,136 @@ export async function handleCreateTable(
 
       logger?.info(`Table created: ${tableName}`);
 
+      // If fields provided, generate DDL and update
+      if (hasFields) {
+        const description = createTableArgs.description || tableName;
+        const deliveryClass = (
+          createTableArgs.delivery_class || 'A'
+        ).toUpperCase();
+        const dataMaintenance = (
+          createTableArgs.data_maintenance || 'RESTRICTED'
+        ).toUpperCase();
+
+        // Map delivery class to DDL enum
+        const deliveryClassMap: Record<string, string> = {
+          A: '#A',
+          C: '#C',
+          L: '#L',
+          G: '#G',
+          E: '#E',
+          S: '#S',
+          W: '#W',
+        };
+        const deliveryClassDdl = deliveryClassMap[deliveryClass] || '#A';
+
+        // Map data maintenance to DDL enum
+        const dataMaintenanceMap: Record<string, string> = {
+          RESTRICTED: '#RESTRICTED',
+          ALLOWED: '#ALLOWED',
+          NOT_ALLOWED: '#NOT_ALLOWED',
+        };
+        const dataMaintenanceDdl =
+          dataMaintenanceMap[dataMaintenance] || '#RESTRICTED';
+
+        // Generate field lines
+        const fieldLines = createTableArgs.fields!.map((field) => {
+          const fieldName = field.name.toLowerCase();
+          const dataElement = field.data_element.toLowerCase();
+          const isKey = field.key === true;
+          const notNull = field.not_null !== undefined ? field.not_null : isKey;
+
+          let annotation = '';
+          if (field.curr_quan_ref) {
+            // Convert TABLE-FIELD format to table.field for annotation
+            const ref = field.curr_quan_ref.replace('-', '.').toLowerCase();
+            annotation = `  @Semantics.amount.currencyCode : '${ref}'\n`;
+          }
+
+          const keyPrefix = isKey ? 'key ' : '    ';
+          const notNullSuffix = notNull ? ' not null' : '';
+          return `${annotation}  ${keyPrefix}${fieldName} : ${dataElement}${notNullSuffix};`;
+        });
+
+        const ddlCode = [
+          `@EndUserText.label : '${description}'`,
+          '@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE',
+          '@AbapCatalog.tableCategory : #TRANSPARENT',
+          `@AbapCatalog.deliveryClass : ${deliveryClassDdl}`,
+          `@AbapCatalog.dataMaintenance : ${dataMaintenanceDdl}`,
+          `define table ${tableName.toLowerCase()} {`,
+          '',
+          ...fieldLines,
+          '',
+          '}',
+        ].join('\n');
+
+        logger?.info(`[CreateTable] Generated DDL for ${tableName}`);
+
+        // Lock
+        const lockHandle = await client.getTable().lock({ tableName });
+
+        try {
+          // Update with generated DDL
+          await client.getTable().update(
+            {
+              tableName,
+              ddlCode,
+              transportRequest: createTableArgs.transport_request,
+            },
+            { lockHandle },
+          );
+          logger?.info(`[CreateTable] Table DDL updated: ${tableName}`);
+
+          // Unlock
+          await client.getTable().unlock({ tableName }, lockHandle);
+          logger?.info(`[CreateTable] Table unlocked: ${tableName}`);
+
+          // Check inactive version
+          try {
+            await safeCheckOperation(
+              () => client.getTable().check({ tableName }, 'inactive'),
+              tableName,
+              {
+                debug: (message: string) =>
+                  logger?.debug(`[CreateTable] ${message}`),
+              },
+            );
+          } catch (checkError: any) {
+            if (!(checkError as any).isAlreadyChecked) {
+              logger?.warn(
+                `[CreateTable] Inactive check had issues: ${tableName}`,
+              );
+            }
+          }
+
+          // Activate
+          if (shouldActivate) {
+            await client.getTable().activate({ tableName });
+            logger?.info(`[CreateTable] Table activated: ${tableName}`);
+          }
+        } catch (error) {
+          // Unlock on error
+          try {
+            await client.getTable().unlock({ tableName }, lockHandle);
+          } catch (unlockError) {
+            logger?.error('Failed to unlock table after error:', unlockError);
+          }
+          throw error;
+        }
+      }
+
+      logger?.info(`✅ CreateTable completed successfully: ${tableName}`);
+
       return return_response({
         data: JSON.stringify({
           success: true,
           table_name: tableName,
           package_name: createTableArgs.package_name,
           transport_request: createTableArgs.transport_request || 'local',
-          message: `Table ${tableName} created successfully. Use UpdateTable to set DDL code.`,
+          activated: shouldActivate,
+          message: hasFields
+            ? `Table ${tableName} created successfully${shouldActivate ? ' and activated' : ''}`
+            : `Table ${tableName} created successfully. Use UpdateTable to set DDL code.`,
         }),
       } as AxiosResponse);
     } catch (error: any) {

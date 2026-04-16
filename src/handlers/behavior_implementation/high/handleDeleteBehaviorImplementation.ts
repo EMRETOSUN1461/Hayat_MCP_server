@@ -84,6 +84,16 @@ export async function handleDeleteBehaviorImplementation(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await behaviorImplementationObject.read({
+        className: behaviorImplementationName,
+      });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `BehaviorImplementation ${behaviorImplementationName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteBehaviorImplementation completed successfully: ${behaviorImplementationName}`,
       );

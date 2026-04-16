@@ -77,6 +77,14 @@ export async function handleDeleteClass(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await classObject.read({ className });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `Class ${className} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(`✅ DeleteClass completed successfully: ${className}`);
 
       return return_response({

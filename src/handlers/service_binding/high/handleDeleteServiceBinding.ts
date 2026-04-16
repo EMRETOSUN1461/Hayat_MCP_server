@@ -52,7 +52,8 @@ export async function handleDeleteServiceBinding(
     const serviceBindingName = args.service_binding_name.trim().toUpperCase();
     const responseFormat = args.response_format ?? 'xml';
     const client = createAdtClient(connection, logger);
-    const state = await client.getServiceBinding().delete({
+    const serviceBindingObject = client.getServiceBinding();
+    const state = await serviceBindingObject.delete({
       bindingName: serviceBindingName,
       transportRequest: args.transport_request,
     });
@@ -60,6 +61,16 @@ export async function handleDeleteServiceBinding(
     if (!response) {
       throw new Error(
         `Delete did not return a response for service binding ${serviceBindingName}`,
+      );
+    }
+
+    // Verify deletion — read returns undefined when object doesn't exist (404)
+    const verifyResult = await serviceBindingObject.read({
+      bindingName: serviceBindingName,
+    });
+    if (verifyResult !== undefined) {
+      throw new Error(
+        `ServiceBinding ${serviceBindingName} deletion reported success but the object still exists. Check transport locks and permissions.`,
       );
     }
 

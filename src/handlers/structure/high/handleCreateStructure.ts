@@ -224,10 +224,50 @@ export async function handleCreateStructure(
         description: createStructureArgs.description || structureName,
       });
 
+      // Generate DDL from fields
+      const description = createStructureArgs.description || structureName;
+      const fieldLines = createStructureArgs.fields.map((field) => {
+        const fieldName = field.name.toLowerCase();
+        if (field.data_element) {
+          return `  ${fieldName} : ${field.data_element.toLowerCase()};`;
+        }
+        if (field.structure_ref) {
+          return `  ${fieldName} : ${field.structure_ref.toLowerCase()};`;
+        }
+        if (field.table_ref) {
+          return `  ${fieldName} : ${field.table_ref.toLowerCase()};`;
+        }
+        if (field.domain) {
+          return `  ${fieldName} : ${field.domain.toLowerCase()};`;
+        }
+        // Fallback to generic type (should not happen per coding standards)
+        const dataType = (field.data_type || 'CHAR').toLowerCase();
+        const length = field.length || 1;
+        const decimals = field.decimals || 0;
+        if (['dec', 'curr', 'quan'].includes(dataType)) {
+          return `  ${fieldName} : abap.${dataType}(${length},${decimals});`;
+        }
+        return `  ${fieldName} : abap.${dataType}(${length});`;
+      });
+
+      // Build include lines
+      const includeLines = (createStructureArgs.includes || []).map((inc) => {
+        const incName = inc.name.toLowerCase();
+        if (inc.suffix) {
+          return `  include ${incName} : suffix ${inc.suffix};`;
+        }
+        return `  include ${incName};`;
+      });
+
+      const allLines = [...includeLines, ...fieldLines];
+      const ddlCode = `@EndUserText.label : '${description}'\n@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE\ndefine structure ${structureName.toLowerCase()} {\n\n${allLines.join('\n')}\n\n}`;
+
+      logger?.info(`[CreateStructure] Generated DDL for ${structureName}`);
+
       // Create
       await client.getStructure().create({
         structureName,
-        description: createStructureArgs.description || structureName,
+        description,
         packageName: createStructureArgs.package_name,
         ddlCode: '',
         transportRequest: createStructureArgs.transport_request,
@@ -237,9 +277,18 @@ export async function handleCreateStructure(
       const lockHandle = await client.getStructure().lock({ structureName });
 
       try {
-        // Note: StructureBuilder internally generates DDL from fields/includes
-        // For now, skip update as structure creation already includes field definitions
-        // TODO: Implement DDL generation or enhance AdtClient to accept fields directly
+        // Update with generated DDL
+        await client.getStructure().update(
+          {
+            structureName,
+            ddlCode,
+            transportRequest: createStructureArgs.transport_request,
+          },
+          { lockHandle },
+        );
+        logger?.info(
+          `[CreateStructure] Structure DDL updated: ${structureName}`,
+        );
 
         // Unlock (MANDATORY after lock)
         await client.getStructure().unlock({ structureName }, lockHandle);

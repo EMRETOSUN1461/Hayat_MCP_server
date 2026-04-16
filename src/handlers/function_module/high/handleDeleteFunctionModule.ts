@@ -90,6 +90,17 @@ export async function handleDeleteFunctionModule(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await functionModuleObject.read({
+        functionModuleName,
+        functionGroupName,
+      });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `FunctionModule ${functionModuleName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteFunctionModule completed successfully: ${functionModuleName}`,
       );

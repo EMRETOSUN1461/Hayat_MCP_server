@@ -80,6 +80,19 @@ export async function handleDeleteMetadataExtension(
         );
       }
 
+      // Verify deletion — metadata extension read returns { errors: [] } (no readResult) on 404
+      const verifyResult = await metadataExtensionObject.read({
+        name: metadataExtensionName,
+      });
+      if (
+        verifyResult !== undefined &&
+        verifyResult?.readResult !== undefined
+      ) {
+        throw new Error(
+          `MetadataExtension ${metadataExtensionName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteMetadataExtension completed successfully: ${metadataExtensionName}`,
       );

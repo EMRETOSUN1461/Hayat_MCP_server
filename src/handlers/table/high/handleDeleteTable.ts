@@ -77,6 +77,14 @@ export async function handleDeleteTable(
         );
       }
 
+      // Verify deletion — table read returns { readResult: undefined } on 404
+      const verifyResult = await tableObject.read({ tableName });
+      if (verifyResult?.readResult !== undefined) {
+        throw new Error(
+          `Table ${tableName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(`✅ DeleteTable completed successfully: ${tableName}`);
 
       return return_response({

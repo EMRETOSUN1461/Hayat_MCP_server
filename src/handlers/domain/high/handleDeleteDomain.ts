@@ -77,6 +77,14 @@ export async function handleDeleteDomain(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await domainObject.read({ domainName });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `Domain ${domainName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(`✅ DeleteDomain completed successfully: ${domainName}`);
 
       return return_response({

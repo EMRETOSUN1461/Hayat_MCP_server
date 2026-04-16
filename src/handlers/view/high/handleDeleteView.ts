@@ -77,6 +77,14 @@ export async function handleDeleteView(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await viewObject.read({ viewName });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `View ${viewName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(`✅ DeleteView completed successfully: ${viewName}`);
 
       return return_response({

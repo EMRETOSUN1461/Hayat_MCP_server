@@ -78,6 +78,14 @@ export async function handleDeleteDataElement(
         );
       }
 
+      // Verify deletion — read returns undefined when object doesn't exist (404)
+      const verifyResult = await dataElementObject.read({ dataElementName });
+      if (verifyResult !== undefined) {
+        throw new Error(
+          `Data element ${dataElementName} deletion reported success but the object still exists. Check transport locks and permissions.`,
+        );
+      }
+
       logger?.info(
         `✅ DeleteDataElement completed successfully: ${dataElementName}`,
       );
