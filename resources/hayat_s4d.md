@@ -1,7 +1,10 @@
 # HAYAT HOLDİNG — S/4HANA ABAP GELİŞTİRME AGENT KURALLARI
 
+> **Geçerli Sistem: SSID = S4D (Hayat S/4HANA Sistemi)**
+> Bu kural seti yalnızca S4D sistemi için geçerlidir. Diğer sistemler için ayrı kural setleri kullanılır.
+>
 > Bu doküman MCP agent'ın memory'sinde kalıcı olarak tutulacak kural setidir.
-> İki ana bölümden oluşur: (A) Sabit kurallar, (B) Her geliştirmede kullanıcıya sorulacak bilgiler, (C) Gerçek sistem örnekleri.
+> Dört ana bölümden oluşur: (A) Sabit kurallar, (B) Her geliştirmede kullanıcıya sorulacak bilgiler, (C) Gerçek sistem örnekleri, (D) Agent davranış kuralları.
 
 ---
 
@@ -149,7 +152,7 @@
 
 8. **Reuse ALV kullanılmaz.** CL_GUI_ALV_GRID tercih edilir.
 
-9. **ALV raporları:** `ZBC_000_IF01` interface yapısı ve `ZBC_000_P01` programı örnek alınarak geliştirilir.
+9. **ALV raporları:** `ZBC_000_IF01` interface yapısını implemente eder. Framework template'i `ZBC_000_P01` / `ZBC_000_CL01` (BC paketindeki resmi örnek); gerçek sistem implementasyonu için `ZSD_616_P01` / `ZSD_616_CL01` referans alınır (bkz. C1).
 
 10. **ABAP Memory:** Memory ID ilgili obje adıyla başlar.
 
@@ -339,7 +342,7 @@ Agent bir nesne oluşturma veya geliştirme talebi aldığında, **önce gelişt
 ### B1. Her Zaman Sorulacaklar
 
 1. **Modül:** SD, MM, FI, PP, QM, PM, TR, AA, HR, CCA, PC, BC, EWM...
-2. **Ana paket ve alt paket:** Ör: "ZSD ana paketi altında ZSD_999 alt paketi"
+2. **Ana paket ve alt paket:** Yalnızca sıfırdan **yeni bir alt paket oluşturulacaksa** sorulur. Kullanıcı mevcut bir paket adı vermişse veya geliştirme zaten bir paket altında devam ediyorsa bu bilgi **sorulmaz**; mevcut paket kullanılmaya devam edilir.
 3. **Oluşturulacak her nesnenin tam adı ve numarası:** Agent hiçbir nesneyi numarasını tahmin ederek oluşturmaz. Aşağıdaki nesneler dahil olmak üzere her nesne için numara kullanıcıdan alınır:
    - Program: `ZXX_NNN_PNN` → "Program numarası ne olacak? Ör: P01, P02?"
    - Include: `ZXX_NNN_PNN_INN` → "Include numarası ne olacak? Ör: I01, I02?"
@@ -363,6 +366,26 @@ Numaralar B1'de sorulacak. Ek olarak:
 - FS-TS numarası
 - Created By / Analyst isimleri
 - Gerekli structure, table type varsa numaraları
+
+### B3. Exit/BAdI/Enhancement Geliştirme
+
+Bu alan en çok numara gerektiren kısımdır. Tüm numaralar ZBCENH üzerinden developer tarafından takip edilir. Agent hiçbir numarayı tahmin etmez, hepsini kullanıcıya sorar.
+
+1. **Exit tipi:** Enhancement, BAdI, Function Exit, Screen Exit, Repair?
+2. **Exit ID numarası:** Ör: "ENHA_EXXX numarası nedir?" (ENHA_E051, ENHA_E052 gibi — developer ZBCENH'den sıradaki numarayı alır)
+3. **BAdI ID numarası (BAdI ise):** Ör: "BADI_EXXX numarası nedir?" (BADI_E004, BADI_E005 gibi)
+4. **Function Exit ID numarası (Function Exit ise):** Ör: "EXIT_EXXX numarası nedir?"
+5. **Enhancement Implementation numarası:** Ör: "ZSD_000_ENHA_IMNN — IM numarası kaç?"
+6. **Exit uygulama class numarası:** Ör: "ZSD_167_ENHA_E051_CL01 mi olacak?"
+7. **Include numarası:** Ör: "ZSD_000_ENHA_E051_I01 mi?"
+8. **Koşullu çıkış gerekli mi?** (ZBC_ENH_T03)
+
+**BAdI için ek olarak:**
+- BAdI Implementation numarası (ör: ZMM_000_BADI_IM02, sıradaki IM?)
+- BAdI Implementation Class numarası (ör: ZMM_000_BADI_IM02_CL01)
+- BAdI Exit Class numarası (ör: ZSD_575_BADI_E004_CL01)
+
+**Önemli:** Agent ZBCENH bakımı yapmaz. Developer sıradaki numarayı ZBCENH işlem kodundan kontrol edip agent'a bildirir.
 
 ### B4. Structure Oluşturma
 
@@ -413,26 +436,6 @@ Data Maintenance     : ALLOWED (veya RESTRICTED, NOT_ALLOWED)
 - `Curr/Quan Ref` kolonunda CURR/QUAN alanları için `TABLO-ALAN` formatında referans zorunludur (ör: `VBAP-WAERK`)
 - Agent bu bilgilerin tamamını almadan tablo oluşturmaz
 
-### B3. Exit/BAdI/Enhancement Geliştirme
-
-Bu alan en çok numara gerektiren kısımdır. Tüm numaralar ZBCENH üzerinden developer tarafından takip edilir. Agent hiçbir numarayı tahmin etmez, hepsini kullanıcıya sorar.
-
-1. **Exit tipi:** Enhancement, BAdI, Function Exit, Screen Exit, Repair?
-2. **Exit ID numarası:** Ör: "ENHA_EXXX numarası nedir?" (ENHA_E051, ENHA_E052 gibi — developer ZBCENH'den sıradaki numarayı alır)
-3. **BAdI ID numarası (BAdI ise):** Ör: "BADI_EXXX numarası nedir?" (BADI_E004, BADI_E005 gibi)
-4. **Function Exit ID numarası (Function Exit ise):** Ör: "EXIT_EXXX numarası nedir?"
-5. **Enhancement Implementation numarası:** Ör: "ZSD_000_ENHA_IMNN — IM numarası kaç?"
-6. **Exit uygulama class numarası:** Ör: "ZSD_167_ENHA_E051_CL01 mi olacak?"
-7. **Include numarası:** Ör: "ZSD_000_ENHA_E051_I01 mi?"
-8. **Koşullu çıkış gerekli mi?** (ZBC_ENH_T03)
-
-**BAdI için ek olarak:**
-- BAdI Implementation numarası (ör: ZMM_000_BADI_IM02, sıradaki IM?)
-- BAdI Implementation Class numarası (ör: ZMM_000_BADI_IM02_CL01)
-- BAdI Exit Class numarası (ör: ZSD_575_BADI_E004_CL01)
-
-**Önemli:** Agent ZBCENH bakımı yapmaz. Developer sıradaki numarayı ZBCENH işlem kodundan kontrol edip agent'a bildirir.
-
 ### B6. CDS View
 
 Numaralar B1'de sorulacak. Ek olarak:
@@ -459,7 +462,9 @@ Numaralar B1'de sorulacak. Ek olarak:
 
 ### C1. ALV Rapor Programı Yapısı (ZBC_000_IF01 Pattern)
 
-Hayat'ta tüm ALV raporları aynı yapıyı takip eder. **Referans program: ZSD_616_P01 / ZSD_616_CL01.**
+Hayat'ta tüm ALV raporları aynı yapıyı takip eder.
+- **Framework template:** `ZBC_000_P01` / `ZBC_000_CL01` (ZBC_000 paketindeki resmi örnek)
+- **Gerçek sistem implementasyonu:** `ZSD_616_P01` / `ZSD_616_CL01` (aşağıdaki kod örnekleri bu programdan alınmıştır)
 
 **Ana Program (ZSD_616_P01):**
 ```abap
@@ -685,19 +690,29 @@ CLASS-METHODS:
 
 ## D. AGENT DAVRANIŞ KURALLARI
 
-1. **Numara tahmini yapmaz.** Her nesne numarasını (P01/P02, I01/I02, CL01/CL02, FG01/FG02, FM01/FM02, ENHA_IM31/IM32, ENHA_E051/E052, BADI_E004/E005 vb.) kullanıcıya sorar.
-2. **Sisteme gereksiz sorgu atmaz.** Sıradaki numara için SearchObject veya GetPackageContents çağırmaz.
-3. **Nesne oluşturmadan önce tüm bilgileri toplar.** Eksik bilgiyle nesne oluşturmaya başlamaz.
-4. **Oluşturduğu kodun standartlara uygunluğunu kendi kontrol eder:** prefix'ler, SY-DATLO kullanımı, hardcode olup olmadığı, IF FOUND ibaresi vb.
-5. **Birden fazla nesne oluşturulacaksa** (ör: exit class + include + ZBCENH kaydı), tüm nesne listesini ve numaralarını önceden kullanıcıya onaylatır.
-6. **Standart tablolara doğrudan SQL yazmaz.** Standart SAP tablolarına INSERT/UPDATE/DELETE/MODIFY yazmak yerine uygun BAPI/FM/sınıf arar. Bulamazsa kullanıcıyı bilgilendirir ve o tabloya müdahale etmez. Z/Y tabloları bu kuraldan muaftır.
-7. **Transport numarasını her zaman sorar.** Nesne oluşturmaya veya değiştirmeye başlamadan önce kullanılacak transport request numarasını kullanıcıdan alır.
-8. **Alt paket yoksa önce oluşturur.** Nesne oluşturmaya başlamadan önce hedef alt paketin (ZXX_NNN) var olup olmadığını kontrol eder. Yoksa `CreatePackage` ile oluşturur ve aktive eder. Bu adımı kullanıcıya sormadan otomatik yapar. Paket oluştururken yalnızca şunları sorar: paket adı, üst paket (super_package), transport request. Transport Layer (ZS4D), Software Component (HOME), Record Changes (true) otomatik kullanılır — kullanıcıya sorulmaz.
-9. **Structure oluşturmadan önce alan bilgilerini sorar.** Agent hiçbir zaman kendi başına structure alan listesi belirlemez. Kullanıcıdan B4 bölümündeki `Alan Adı | Data Element | Curr/Quan Ref` formatında alan bilgilerini ister. CURR/QUAN alanları için `Curr/Quan Ref` kolonunda `TABLO-ALAN` formatında referans zorunludur.
-10. **Tablo oluşturmadan önce alan ve özellik bilgilerini sorar.** Agent hiçbir zaman kendi başına tablo alan listesi belirlemez. Kullanıcıdan B5 bölümündeki `Alan Adı | Data Element | Key | Curr/Quan Ref` formatında bilgileri ister. Search help ve SM30 bakım ekranı DDL'de desteklenmez — kullanıcı SE11'den manuel ekler.
-11. **Structure ve tablolarda generic tip kullanmaz; alanları verilen isim ve sırayla oluşturur.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)`, `abap.int4` gibi built-in/generic tipler kesinlikle kullanılmaz. Her alan için mutlaka sistemdeki bir data element kullanılır (ör: `KWMENG`, `NETWR_AP`, `VBELN_VA`). Data element bilgisi verilmeden agent structure veya tablo oluşturmaz — kullanıcıdan data element adını ister. Alanlar kullanıcının verdiği isimle ve verdiği sırayla oluşturulur; agent hiçbir alanı yeniden adlandıramaz, sırasını değiştiremez veya kendi başına ekstra alan ekleyemez.
-12. **ALV sınıflarında referans program ZSD_616_CL01'dir.** `create_alv_object` içinde container ve ALV nesnesi oluşturulur (`CHECK IS BOUND` yapılmaz). `screen_pbo` içinde `SET PF-STATUS` ve `IF go_alv IS INITIAL` kontrolü zorunludur. `fill_field_catalog` içinde kolon başlıkları data element'ten gelir, hardcode yazılmaz (`colddictxt = 'L'`).
-13. **Nesne oluşturma sırası zorunludur (bağımlılık zinciri).** Birden fazla nesne oluşturulacaksa, agent aşağıdaki sırayı takip eder. Her nesneyi oluşturup **aktive ettikten sonra** bir sonraki adıma geçer. Bağımlılığı karşılanmamış bir nesne asla oluşturulmaya çalışılmaz (ör: domain aktif değilken data element oluşturulmaz, data element aktif değilken structure oluşturulmaz).
+> ⚠️ **KURAL 1 EN YÜKSEK ÖNCELİKLİDİR — hiçbir geliştirme adımı bu kontrol yapılmadan başlatılamaz.**
+
+1. **Mevcut objelerde açık transport kontrolü — geliştirmeye başlamanın ön koşuludur.** Kapsam içinde **mevcut bir objeyi değiştirme** adımı varsa, geliştirmeye başlamadan önce kapsamdaki **tüm mevcut objeler** `GetObjectInfo` veya `GetTransport` ile kontrol edilir. Kullanıcının verdiği transport request **dışında** herhangi bir objede açık transport request tespit edilirse:
+   - Geliştirme **tamamen durdurulur.**
+   - **Hiçbir nesne oluşturulmaz, hiçbir transport yaratılmaz.**
+   - Kullanıcıya hangi objelerde hangi açık request'lerin bulunduğu bildirilir ve devam için talimat beklenir.
+   - Bu kural tek bir objede bile ihlal edilse geçerlidir — kısmi geliştirme başlatılamaz.
+
+2. **MCP ile yapılamayan geliştirmelerde hiçbir şey oluşturmaz.** Bir geliştirme talebi kapsamında Screen (Dynpro), Adobe Form, Smartform veya başka bir MCP tool'u bulunmayan nesne tipi varsa, agent **hiçbir nesne ve transport oluşturmaz**; doğrudan kullanıcıya şu şekilde döner: _"Bu geliştirme MCP tool ile tam olarak yapılamıyor. Kapsam dışı kalan nesneler: [liste]."_ **İstisnalar:** SM30 bakım ekranı ve Table Type bu kuralın dışındadır — bu iki nesne atlanarak kodlamaya devam edilir ve eksik kaldığı bilgisi işin **sonunda** kullanıcıya bildirilir.
+
+3. **Numara tahmini yapmaz.** Her nesne numarasını (P01/P02, I01/I02, CL01/CL02, FG01/FG02, FM01/FM02, ENHA_IM31/IM32, ENHA_E051/E052, BADI_E004/E005 vb.) kullanıcıya sorar.
+4. **Sisteme gereksiz sorgu atmaz.** Sıradaki numara için SearchObject veya GetPackageContents çağırmaz.
+5. **Nesne oluşturmadan önce tüm bilgileri toplar.** Eksik bilgiyle nesne oluşturmaya başlamaz.
+6. **Oluşturduğu kodun standartlara uygunluğunu kendi kontrol eder:** prefix'ler, SY-DATLO kullanımı, hardcode olup olmadığı, IF FOUND ibaresi vb.
+7. **Birden fazla nesne oluşturulacaksa** (ör: exit class + include + ZBCENH kaydı), tüm nesne listesini ve numaralarını önceden kullanıcıya onaylatır.
+8. **Standart tablolara doğrudan SQL yazmaz.** Standart SAP tablolarına INSERT/UPDATE/DELETE/MODIFY yazmak yerine uygun BAPI/FM/sınıf arar. Bulamazsa kullanıcıyı bilgilendirir ve o tabloya müdahale etmez. Z/Y tabloları bu kuraldan muaftır.
+9. **Transport numarasını her zaman sorar.** Nesne oluşturmaya veya değiştirmeye başlamadan önce kullanılacak transport request numarasını kullanıcıdan alır.
+10. **Paket kullanımı:** Kullanıcı mevcut bir paket belirtmişse veya geliştirme zaten bir paket bağlamında devam ediyorsa paket bilgisi **sorulmaz**; o paket kullanılır. Yalnızca sıfırdan yeni bir alt paket oluşturulması gerektiğinde kullanıcıya paket adı, üst paket (super_package) ve transport request sorulur. Transport Layer (ZS4D), Software Component (HOME), Record Changes (true) her zaman otomatik kullanılır — bunlar kullanıcıya sorulmaz. Hedef paket sistemde yoksa `CreatePackage` ile oluşturulur ve aktive edilir.
+11. **Structure oluşturmadan önce alan bilgilerini sorar.** Agent hiçbir zaman kendi başına structure alan listesi belirlemez. Kullanıcıdan B4 bölümündeki `Alan Adı | Data Element | Curr/Quan Ref` formatında alan bilgilerini ister. CURR/QUAN alanları için `Curr/Quan Ref` kolonunda `TABLO-ALAN` formatında referans zorunludur.
+12. **Tablo oluşturmadan önce alan ve özellik bilgilerini sorar.** Agent hiçbir zaman kendi başına tablo alan listesi belirlemez. Kullanıcıdan B5 bölümündeki `Alan Adı | Data Element | Key | Curr/Quan Ref` formatında bilgileri ister. Search help ve SM30 bakım ekranı DDL'de desteklenmez — kullanıcı SE11'den manuel ekler.
+13. **Structure ve tablolarda generic tip kullanmaz; alanları verilen isim ve sırayla oluşturur.** `abap.char(N)`, `abap.quan(N,M)`, `abap.curr(N,M)`, `abap.numc(N)`, `abap.int4` gibi built-in/generic tipler kesinlikle kullanılmaz. Her alan için mutlaka sistemdeki bir data element kullanılır (ör: `KWMENG`, `NETWR_AP`, `VBELN_VA`). Data element bilgisi verilmeden agent structure veya tablo oluşturmaz — kullanıcıdan data element adını ister. Alanlar kullanıcının verdiği isimle ve verdiği sırayla oluşturulur; agent hiçbir alanı yeniden adlandıramaz, sırasını değiştiremez veya kendi başına ekstra alan ekleyemez.
+14. **ALV sınıflarında referans program ZSD_616_CL01'dir.** `create_alv_object` içinde container ve ALV nesnesi oluşturulur (`CHECK IS BOUND` yapılmaz). `screen_pbo` içinde `SET PF-STATUS` ve `IF go_alv IS INITIAL` kontrolü zorunludur. `fill_field_catalog` içinde kolon başlıkları data element'ten gelir, hardcode yazılmaz (`colddictxt = 'L'`).
+15. **Nesne oluşturma sırası zorunludur (bağımlılık zinciri).** Birden fazla nesne oluşturulacaksa, agent aşağıdaki sırayı takip eder. Her nesneyi oluşturup **aktive ettikten sonra** bir sonraki adıma geçer. Bağımlılığı karşılanmamış bir nesne asla oluşturulmaya çalışılmaz (ör: domain aktif değilken data element oluşturulmaz, data element aktif değilken structure oluşturulmaz).
 
     **Oluşturma sırası:**
     1. Domain

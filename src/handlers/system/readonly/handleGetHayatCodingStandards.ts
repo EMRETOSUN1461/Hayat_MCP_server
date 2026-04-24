@@ -14,10 +14,16 @@ export const TOOL_DEFINITION = {
   name: 'GetHayatCodingStandards',
   available_in: ['onprem', 'cloud', 'legacy'] as const,
   description:
-    '[read-only] Hayat Holding ABAP geliştirme standartlarını döndürür. Her geliştirme talebi öncesinde çağrılmalıdır. Naming conventions, coding rules, exit/BAdI framework, utility classes ve agent davranış kurallarını içerir.',
+    '[read-only] Hayat Holding ABAP geliştirme standartlarını döndürür. Her geliştirme talebi öncesinde çağrılmalıdır. Naming conventions, coding rules, exit/BAdI framework, utility classes ve agent davranış kurallarını içerir. Sistem bazlı kural setleri: S4D (Hayat S/4HANA), HHD (Hayat HR Dev).',
   inputSchema: {
     type: 'object',
     properties: {
+      system: {
+        type: 'string',
+        enum: ['S4D', 'HHD'],
+        description:
+          'Hangi sistemin kural seti döndürülsün. S4D = Hayat S/4HANA sistemi, HHD = Hayat HR Dev sistemi (ABAP 7.50). Default: S4D',
+      },
       section: {
         type: 'string',
         enum: [
@@ -37,7 +43,13 @@ export const TOOL_DEFINITION = {
   },
 } as const;
 
+const SYSTEM_FILE_MAP: Record<string, string> = {
+  S4D: 'hayat_s4d.md',
+  HHD: 'hayat_hhd.md',
+};
+
 interface GetHayatCodingStandardsArgs {
+  system?: 'S4D' | 'HHD';
   section?:
     | 'all'
     | 'naming'
@@ -85,6 +97,8 @@ export async function handleGetHayatCodingStandards(
 ) {
   try {
     const section = args?.section ?? 'all';
+    const system = args?.system ?? 'S4D';
+    const fileName = SYSTEM_FILE_MAP[system] ?? 'hayat_s4d.md';
 
     // Resolve path relative to compiled output: dist/handlers/system/readonly/ -> project root
     const resourcePath = path.resolve(
@@ -94,7 +108,7 @@ export async function handleGetHayatCodingStandards(
       '..',
       '..',
       'resources',
-      'hayat-agent-memory.md',
+      fileName,
     );
 
     if (!fs.existsSync(resourcePath)) {

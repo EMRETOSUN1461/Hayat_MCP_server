@@ -113,6 +113,7 @@
     "url": "git+https://github.com/fr0ster/mcp-abap-adt.git"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.91.0",
     "@biomejs/biome": "^2.4.10",
     "@modelcontextprotocol/inspector": "^0.21.1",
     "@types/jest": "^30.0.0",
@@ -148,6 +149,7 @@
     "@mcp-abap-adt/logger": "^0.1.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "axios": "^1.14.0",
+    "exceljs": "^4.4.0",
     "fast-xml-parser": "^5.5.10",
     "js-yaml": "^4.1.1",
     "pino": "^10.1.0",

@@ -162,12 +162,31 @@ export async function handleCreateTable(
       // Create client
       const client = createAdtClient(connection, logger);
 
-      // Validate
-      await client.getTable().validate({
-        tableName,
-        packageName: createTableArgs.package_name,
-        description: createTableArgs.description || tableName,
-      });
+      // Validate (skip gracefully on systems without ADT validation endpoint, e.g. HHD/NW 7.5)
+      try {
+        await client.getTable().validate({
+          tableName,
+          packageName: createTableArgs.package_name,
+          description: createTableArgs.description || tableName,
+        });
+      } catch (validateError: any) {
+        const errMsg =
+          validateError?.response?.data ||
+          validateError?.message ||
+          String(validateError);
+        const isResourceNotFound =
+          typeof errMsg === 'string' &&
+          (errMsg.includes('ExceptionResourceNotFound') ||
+            errMsg.includes('/sap/bc/adt/ddic/tables/validation') ||
+            errMsg.includes('does not exist'));
+        if (isResourceNotFound) {
+          logger?.warn(
+            `[CreateTable] Validation endpoint not available on this system, skipping validation for ${tableName}`,
+          );
+        } else {
+          throw validateError;
+        }
+      }
 
       // Create
       await client.getTable().create({
