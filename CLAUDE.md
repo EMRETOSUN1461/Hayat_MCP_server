@@ -1,5 +1,17 @@
 # MCP ABAP ADT - Development Guide
 
+## Agent Davranış Kuralları
+
+Bu projede çalışan tüm agent oturumları (Claude Code, Azure-hosted agent, vs.) aşağıdaki kural setlerini okumakla yükümlüdür:
+
+- **Sistemler-arası kurallar**: [`docs/agent-rules/global.md`](docs/agent-rules/global.md) — sistem seçimi, transport sorma, MCP'nin üretemediği nesneler, sistem-bazlı kısıtlar, **DDIC değişiklik güvenliği** (standart tablo/append/data element/domain için katı koruma — KURAL #9).
+- **Sistem-bazlı kodlama standartları**: MCP server'ın `GetHayatCodingStandards` tool'undan alınır:
+  - `GetHayatCodingStandards({system: "S4D"})` → S4HANA standartları (`resources/hayat_s4d.md`)
+  - `GetHayatCodingStandards({system: "HHD"})` → HR Dev standartları (`resources/hayat_hhd.md`)
+  - `GetHayatCodingStandards({system: "HRD"})` → ECC EHP7 standartları (`resources/hayat_hrd.md`)
+
+Kullanıcı "ECC" derse `system="HRD"` kullanılır (sistem ID = HRD).
+
 ## Testing
 
 ### Integration Tests
