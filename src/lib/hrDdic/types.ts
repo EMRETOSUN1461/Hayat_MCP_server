@@ -36,11 +36,19 @@ export interface HrDdicDtelSpec {
   scrtext_l?: string;
 }
 
+/**
+ * ABAP-aligned field shape for the Z_HAYAT_DDIC_CREATE dispatcher.
+ * Field names mirror the ABAP `ty_field` structure (FLAG components),
+ * not TS booleans — so the camelCase JSON deserializer in /ui2/cl_json
+ * matches them on the FM side.
+ */
 export interface HrDdicField {
   fieldname: string;
   rollname: string;
-  key?: boolean;
-  notnull?: boolean;
+  /** 'X' = key field, '' / omitted = data field */
+  keyflag?: string;
+  /** 'X' = NOT NULL, '' / omitted = nullable */
+  notnull?: string;
   reftable?: string;
   reffield?: string;
 }

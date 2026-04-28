@@ -105,6 +105,26 @@ export const TOOL_DEFINITION = {
         description:
           'Activate table after creation. Default: true. Only applicable when fields are provided.',
       },
+      includes: {
+        type: 'array',
+        description:
+          'Include other structures via .INCLUDE entries. Only honoured when the HR DDIC dispatcher path is taken (legacy / onprem-HR systems). Each item embeds the named structure into the table after the inline fields[].',
+        items: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            structure: {
+              type: 'string',
+              description: 'Structure name to include (e.g., ZAI_TEST_S01).',
+            },
+            suffix: {
+              type: 'string',
+              description: 'Optional group suffix for the included fields.',
+            },
+          },
+          required: ['structure'],
+        },
+      },
     },
     required: ['table_name', 'package_name'],
   },
@@ -118,6 +138,11 @@ interface TableField {
   curr_quan_ref?: string;
 }
 
+interface TableInclude {
+  structure: string;
+  suffix?: string;
+}
+
 interface CreateTableArgs {
   table_name: string;
   description?: string;
@@ -127,6 +152,7 @@ interface CreateTableArgs {
   delivery_class?: string;
   data_maintenance?: string;
   fields?: TableField[];
+  includes?: TableInclude[];
   activate?: boolean;
 }
 
@@ -404,22 +430,30 @@ async function dispatchToHrRfc(
       reftable = t?.toUpperCase();
       reffield = f?.toUpperCase();
     }
+    const isKey = field.key === true;
+    const isNotNull =
+      field.not_null !== undefined ? field.not_null === true : isKey;
     return {
       fieldname: field.name.toUpperCase(),
       rollname: field.data_element.toUpperCase(),
-      key: field.key === true,
-      notnull:
-        field.not_null !== undefined ? field.not_null : field.key === true,
+      keyflag: isKey ? 'X' : '',
+      notnull: isNotNull ? 'X' : '',
       reftable,
       reffield,
     };
   });
+
+  const includes = args.includes?.map((entry) => ({
+    structure: entry.structure.toUpperCase(),
+    suffix: entry.suffix?.toUpperCase(),
+  }));
 
   const spec: HrDdicTableSpec = {
     description: args.description || tableName,
     delivery_class: DELIVERY_CLASS_TO_DD02V[deliveryClass] || 'A',
     data_maintenance: DATA_MAINTENANCE_TO_DD02V[dataMaintenance] ?? ' ',
     fields,
+    ...(includes ? { includes } : {}),
   };
 
   const dispatcher = new HrDdicDispatcherClient(context);

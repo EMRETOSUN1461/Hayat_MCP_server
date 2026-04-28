@@ -22,7 +22,7 @@ import { validateTransportRequest } from '../../../utils/transportValidation.js'
 
 export const TOOL_DEFINITION = {
   name: 'CreateTableType',
-  available_in: ['legacy'] as const,
+  available_in: ['onprem', 'legacy'] as const,
   description:
     'Create an ABAP table type on a legacy/HR system via the Z_HAYAT_DDIC_CREATE dispatcher FM.',
   inputSchema: {
