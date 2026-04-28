@@ -8,6 +8,12 @@
 
 import { createAdtClient } from '../../../lib/clients';
 import type { HandlerContext } from '../../../lib/handlers/interfaces';
+import { HrDdicDispatcherClient } from '../../../lib/hrDdic/HrDdicDispatcherClient';
+import {
+  isDdicAdtUnavailableError,
+  shouldUseHrDdicDispatcher,
+} from '../../../lib/hrDdic/routing';
+import type { HrDdicTableSpec } from '../../../lib/hrDdic/types';
 import {
   type AxiosResponse,
   ErrorCode,
@@ -20,7 +26,7 @@ import { validateTransportRequest } from '../../../utils/transportValidation.js'
 
 export const TOOL_DEFINITION = {
   name: 'CreateTable',
-  available_in: ['onprem', 'cloud'] as const,
+  available_in: ['onprem', 'cloud', 'legacy'] as const,
   description:
     'Create a new ABAP table via the ADT API. Creates the table object in initial state. Use UpdateTable to set DDL code afterwards.',
   inputSchema: {
@@ -157,6 +163,10 @@ export async function handleCreateTable(
     const shouldActivate = hasFields && createTableArgs.activate !== false;
 
     logger?.info(`Starting table creation: ${tableName}`);
+
+    if (shouldUseHrDdicDispatcher()) {
+      return await dispatchToHrRfc(context, createTableArgs, tableName);
+    }
 
     try {
       // Create client
@@ -313,6 +323,13 @@ export async function handleCreateTable(
         }),
       } as AxiosResponse);
     } catch (error: any) {
+      if (isDdicAdtUnavailableError(error)) {
+        logger?.info(
+          `ADT DDIC endpoint unavailable for ${tableName}; falling back to HR dispatcher`,
+        );
+        return await dispatchToHrRfc(context, createTableArgs, tableName);
+      }
+
       logger?.error(
         `Error creating table ${tableName}: ${error?.message || error}`,
       );
@@ -345,4 +362,93 @@ export async function handleCreateTable(
     }
     return return_error(error);
   }
+}
+
+const DELIVERY_CLASS_TO_DD02V: Record<string, string> = {
+  A: 'A',
+  C: 'C',
+  L: 'L',
+  G: 'G',
+  E: 'E',
+  S: 'S',
+  W: 'W',
+};
+
+const DATA_MAINTENANCE_TO_DD02V: Record<string, string> = {
+  ALLOWED: 'X',
+  RESTRICTED: ' ',
+  NOT_ALLOWED: 'N',
+};
+
+async function dispatchToHrRfc(
+  context: HandlerContext,
+  args: CreateTableArgs,
+  tableName: string,
+) {
+  if (!args.fields || args.fields.length === 0) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'Field list is required when creating a table on a legacy/HR system (the HR dispatcher does not support empty-shell tables)',
+    );
+  }
+
+  const shouldActivate = args.activate !== false;
+  const deliveryClass = (args.delivery_class || 'A').toUpperCase();
+  const dataMaintenance = (args.data_maintenance || 'RESTRICTED').toUpperCase();
+
+  const fields = args.fields.map((field) => {
+    let reftable: string | undefined;
+    let reffield: string | undefined;
+    if (field.curr_quan_ref) {
+      const [t, f] = field.curr_quan_ref.split('-');
+      reftable = t?.toUpperCase();
+      reffield = f?.toUpperCase();
+    }
+    return {
+      fieldname: field.name.toUpperCase(),
+      rollname: field.data_element.toUpperCase(),
+      key: field.key === true,
+      notnull:
+        field.not_null !== undefined ? field.not_null : field.key === true,
+      reftable,
+      reffield,
+    };
+  });
+
+  const spec: HrDdicTableSpec = {
+    description: args.description || tableName,
+    delivery_class: DELIVERY_CLASS_TO_DD02V[deliveryClass] || 'A',
+    data_maintenance: DATA_MAINTENANCE_TO_DD02V[dataMaintenance] ?? ' ',
+    fields,
+  };
+
+  const dispatcher = new HrDdicDispatcherClient(context);
+  const result = await dispatcher.invoke({
+    objectType: 'TABLE',
+    objectName: tableName,
+    packageName: args.package_name,
+    transportRequest: args.transport_request,
+    spec,
+    activate: shouldActivate,
+  });
+
+  if (!result.success) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Failed to create table ${tableName} via HR dispatcher: ${result.message}`,
+    );
+  }
+
+  return return_response({
+    data: JSON.stringify({
+      success: true,
+      table_name: tableName,
+      package_name: args.package_name,
+      transport_request: args.transport_request || 'local',
+      activated: shouldActivate,
+      message: result.message,
+      log: result.log,
+      via: 'hr-ddic-dispatcher',
+    }),
+  } as AxiosResponse);
 }

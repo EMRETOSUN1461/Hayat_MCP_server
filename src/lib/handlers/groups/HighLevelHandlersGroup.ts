@@ -297,6 +297,10 @@ import {
   TOOL_DEFINITION as UpdateTableHigh_Tool,
 } from '../../../handlers/table/high/handleUpdateTable';
 import {
+  TOOL_DEFINITION as CreateTableType_Tool,
+  handleCreateTableType,
+} from '../../../handlers/table_type/high/handleCreateTableType';
+import {
   TOOL_DEFINITION as CreateTransport_Tool,
   handleCreateTransport,
 } from '../../../handlers/transport/high/handleCreateTransport';
@@ -468,6 +472,10 @@ export class HighLevelHandlersGroup extends BaseHandlerGroup {
       {
         toolDefinition: DeleteStructure_Tool,
         handler: withContext(handleDeleteStructure),
+      },
+      {
+        toolDefinition: CreateTableType_Tool,
+        handler: withContext(handleCreateTableType),
       },
       {
         toolDefinition: CreateView_Tool,

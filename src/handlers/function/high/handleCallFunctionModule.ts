@@ -396,26 +396,49 @@ export async function handleCallFunctionModule(
         }
       }
     }
-    await client.getProgram().activate({ programName: CALLER_PROGRAM });
+    // Activation is best-effort — on legacy / HR ADT installations the
+    // /sap/bc/adt/programs/programs/{prog}/activations endpoint may not
+    // exist. The program will already have been left in an executable
+    // state by the previous lock/update/unlock cycle.
+    try {
+      await client.getProgram().activate({ programName: CALLER_PROGRAM });
+    } catch (activateError: any) {
+      logger?.warn?.(
+        `Activation skipped for ${CALLER_PROGRAM} (${activateError?.message || activateError})`,
+      );
+    }
 
-    logger?.info?.('Caller program activated, executing...');
+    logger?.info?.('Caller program activated (best-effort), executing...');
 
     // 5. Run the program
+    // Try profiling first (gives richer telemetry on modern systems);
+    // fall back to a plain run on systems where the profiling endpoint
+    // is not exposed (e.g. legacy / HR ADT installations return
+    // "No suitable resource found" for /sap/bc/adt/runtime/...).
     const executor = new AdtExecutor(connection, logger);
     const programExecutor = executor.getProgramExecutor();
-    const runResult = await programExecutor.runWithProfiling(
-      { programName: CALLER_PROGRAM },
-      {
-        profilerParameters: {
-          description: `CallFM: ${fmName}`,
+    let runResponse: any;
+    try {
+      const runResult = await programExecutor.runWithProfiling(
+        { programName: CALLER_PROGRAM },
+        {
+          profilerParameters: {
+            description: `CallFM: ${fmName}`,
+          },
         },
-      },
-    );
+      );
+      runResponse = runResult.response;
+    } catch (profilingError: any) {
+      logger?.warn?.(
+        `runWithProfiling failed for ${CALLER_PROGRAM} (${profilingError?.message || profilingError}); falling back to plain run()`,
+      );
+      runResponse = await programExecutor.run({ programName: CALLER_PROGRAM });
+    }
 
-    if (runResult.response?.status !== 200) {
+    if (runResponse?.status !== 200) {
       return return_error(
         new Error(
-          `Program execution failed with status ${runResult.response?.status}`,
+          `Program execution failed with status ${runResponse?.status}`,
         ),
       );
     }

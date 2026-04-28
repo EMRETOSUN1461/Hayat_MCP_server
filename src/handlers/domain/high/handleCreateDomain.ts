@@ -9,6 +9,12 @@
 
 import { createAdtClient } from '../../../lib/clients';
 import type { HandlerContext } from '../../../lib/handlers/interfaces';
+import { HrDdicDispatcherClient } from '../../../lib/hrDdic/HrDdicDispatcherClient';
+import {
+  isDdicAdtUnavailableError,
+  shouldUseHrDdicDispatcher,
+} from '../../../lib/hrDdic/routing';
+import type { HrDdicDomainSpec } from '../../../lib/hrDdic/types';
 import {
   type AxiosResponse,
   ErrorCode,
@@ -21,7 +27,7 @@ import { validateTransportRequest } from '../../../utils/transportValidation';
 
 export const TOOL_DEFINITION = {
   name: 'CreateDomain',
-  available_in: ['onprem', 'cloud'] as const,
+  available_in: ['onprem', 'cloud', 'legacy'] as const,
   description:
     'Create a new ABAP domain in SAP system with all required steps: lock, create, check, unlock, activate, and verify.',
   inputSchema: {
@@ -160,6 +166,10 @@ export async function handleCreateDomain(
 
     logger?.info(`Starting domain creation: ${domainName}`);
 
+    if (shouldUseHrDdicDispatcher()) {
+      return await dispatchToHrRfc(context, typedArgs, domainName);
+    }
+
     const client = createAdtClient(connection, logger);
     const shouldActivate = typedArgs.activate !== false;
     let lockHandle: string | undefined;
@@ -246,6 +256,17 @@ export async function handleCreateDomain(
         }
       }
 
+      // Auto-fallback to HR dispatcher when ADT DDIC endpoints are missing
+      // (HR / legacy systems return 404 ExceptionResourceNotFound for
+      // /sap/bc/adt/ddic/domains/...). Only safe when no lock was acquired,
+      // i.e. the ADT path failed before reaching the lock step.
+      if (!lockHandle && isDdicAdtUnavailableError(error)) {
+        logger?.info(
+          `ADT DDIC endpoint unavailable for ${domainName}; falling back to HR dispatcher`,
+        );
+        return await dispatchToHrRfc(context, typedArgs, domainName);
+      }
+
       logger?.error(
         `Error creating domain ${domainName}: ${error?.message || error}`,
       );
@@ -281,4 +302,57 @@ export async function handleCreateDomain(
     }
     return return_error(error);
   }
+}
+
+async function dispatchToHrRfc(
+  context: HandlerContext,
+  args: DomainArgs,
+  domainName: string,
+) {
+  const shouldActivate = args.activate !== false;
+
+  const spec: HrDdicDomainSpec = {
+    description: args.description || domainName,
+    datatype: (args.datatype || 'CHAR').toUpperCase(),
+    leng: args.length ?? 100,
+    decimals: args.decimals ?? 0,
+    outputlen: args.length ?? 100,
+    convexit: args.conversion_exit?.toUpperCase(),
+    lowercase: args.lowercase === true,
+    value_table: args.value_table?.toUpperCase(),
+    fixed_values: args.fixed_values?.map((fv) => ({
+      low: fv.low,
+      ddtext: fv.text,
+    })),
+  };
+
+  const dispatcher = new HrDdicDispatcherClient(context);
+  const result = await dispatcher.invoke({
+    objectType: 'DOMAIN',
+    objectName: domainName,
+    packageName: args.package_name,
+    transportRequest: args.transport_request,
+    spec,
+    activate: shouldActivate,
+  });
+
+  if (!result.success) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Failed to create domain ${domainName} via HR dispatcher: ${result.message}`,
+    );
+  }
+
+  return return_response({
+    data: JSON.stringify({
+      success: true,
+      domain_name: domainName,
+      package: args.package_name,
+      transport_request: args.transport_request,
+      status: shouldActivate ? 'active' : 'inactive',
+      message: result.message,
+      log: result.log,
+      via: 'hr-ddic-dispatcher',
+    }),
+  } as AxiosResponse);
 }

@@ -9,6 +9,12 @@
 
 import { createAdtClient } from '../../../lib/clients';
 import type { HandlerContext } from '../../../lib/handlers/interfaces';
+import { HrDdicDispatcherClient } from '../../../lib/hrDdic/HrDdicDispatcherClient';
+import {
+  isDdicAdtUnavailableError,
+  shouldUseHrDdicDispatcher,
+} from '../../../lib/hrDdic/routing';
+import type { HrDdicDtelSpec } from '../../../lib/hrDdic/types';
 import {
   type AxiosResponse,
   ErrorCode,
@@ -20,7 +26,7 @@ import {
 import { validateTransportRequest } from '../../../utils/transportValidation.js';
 export const TOOL_DEFINITION = {
   name: 'CreateDataElement',
-  available_in: ['onprem', 'cloud'] as const,
+  available_in: ['onprem', 'cloud', 'legacy'] as const,
   description:
     'Create a new ABAP data element in SAP system with all required steps: create, activate, and verify.',
   inputSchema: {
@@ -177,6 +183,10 @@ export async function handleCreateDataElement(
 
     logger?.info(`Starting data element creation: ${dataElementName}`);
 
+    if (shouldUseHrDdicDispatcher()) {
+      return await dispatchToHrRfc(context, typedArgs, dataElementName);
+    }
+
     const client = createAdtClient(connection, logger);
     const shouldActivate = typedArgs.activate !== false;
     const typeKind = typedArgs.type_kind || 'domain';
@@ -278,6 +288,13 @@ export async function handleCreateDataElement(
         }
       }
 
+      if (!lockHandle && isDdicAdtUnavailableError(error)) {
+        logger?.info(
+          `ADT DDIC endpoint unavailable for ${dataElementName}; falling back to HR dispatcher`,
+        );
+        return await dispatchToHrRfc(context, typedArgs, dataElementName);
+      }
+
       logger?.error(
         `Error creating data element ${dataElementName}: ${error?.message || error}`,
       );
@@ -309,4 +326,80 @@ export async function handleCreateDataElement(
     }
     return return_error(error);
   }
+}
+
+async function dispatchToHrRfc(
+  context: HandlerContext,
+  args: DataElementArgs,
+  dataElementName: string,
+) {
+  const shouldActivate = args.activate !== false;
+
+  // HR dispatcher only supports the typical "domain reference" data element flavor.
+  // Other type_kinds (predefinedAbapType, refToClifType, ...) require ADT-specific
+  // metadata that the dispatcher's DDIF_DTEL_PUT path does not model.
+  const typeKind = args.type_kind || 'domain';
+  if (typeKind !== 'domain') {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `HR dispatcher supports only type_kind='domain' for data elements (got '${typeKind}'). Use a domain reference on legacy systems.`,
+    );
+  }
+
+  const domainName = (args.type_name || args.data_type || '').toUpperCase();
+  if (!domainName) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'type_name (domain) is required when creating a data element on a legacy/HR system',
+    );
+  }
+
+  const description = args.description || dataElementName;
+  const spec: HrDdicDtelSpec = {
+    description,
+    domname: domainName,
+    headlen: args.heading_label?.length,
+    scrlen1: args.short_label?.length,
+    scrlen2: args.medium_label?.length,
+    scrlen3: args.long_label?.length,
+    reptext: args.heading_label,
+    scrtext_s: args.short_label,
+    scrtext_m: args.medium_label,
+    scrtext_l: args.long_label,
+  };
+
+  const dispatcher = new HrDdicDispatcherClient(context);
+  const result = await dispatcher.invoke({
+    objectType: 'DTEL',
+    objectName: dataElementName,
+    packageName: args.package_name,
+    transportRequest: args.transport_request,
+    spec,
+    activate: shouldActivate,
+  });
+
+  if (!result.success) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Failed to create data element ${dataElementName} via HR dispatcher: ${result.message}`,
+    );
+  }
+
+  return return_response({
+    data: JSON.stringify(
+      {
+        success: true,
+        data_element_name: dataElementName,
+        package: args.package_name,
+        transport_request: args.transport_request,
+        domain: domainName,
+        status: shouldActivate ? 'active' : 'inactive',
+        message: result.message,
+        log: result.log,
+        via: 'hr-ddic-dispatcher',
+      },
+      null,
+      2,
+    ),
+  } as AxiosResponse);
 }

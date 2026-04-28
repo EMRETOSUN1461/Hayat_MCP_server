@@ -9,6 +9,12 @@
 
 import { createAdtClient } from '../../../lib/clients';
 import type { HandlerContext } from '../../../lib/handlers/interfaces';
+import { HrDdicDispatcherClient } from '../../../lib/hrDdic/HrDdicDispatcherClient';
+import {
+  isDdicAdtUnavailableError,
+  shouldUseHrDdicDispatcher,
+} from '../../../lib/hrDdic/routing';
+import type { HrDdicStructureSpec } from '../../../lib/hrDdic/types';
 import {
   type AxiosResponse,
   ErrorCode,
@@ -21,7 +27,7 @@ import { validateTransportRequest } from '../../../utils/transportValidation.js'
 
 export const TOOL_DEFINITION = {
   name: 'CreateStructure',
-  available_in: ['onprem', 'cloud'] as const,
+  available_in: ['onprem', 'cloud', 'legacy'] as const,
   description:
     'Create a new ABAP structure in SAP system with fields and type references. Includes create, activate, and verify steps.',
   inputSchema: {
@@ -192,6 +198,10 @@ export async function handleCreateStructure(
 
     logger?.info(`Starting structure creation: ${structureName}`);
 
+    if (shouldUseHrDdicDispatcher()) {
+      return await dispatchToHrRfc(context, createStructureArgs, structureName);
+    }
+
     try {
       // Get configuration from environment variables
       // Create logger for connection (only logs when DEBUG_CONNECTORS is enabled)
@@ -360,6 +370,17 @@ export async function handleCreateStructure(
         }),
       } as AxiosResponse);
     } catch (error: any) {
+      if (isDdicAdtUnavailableError(error)) {
+        logger?.info(
+          `ADT DDIC endpoint unavailable for ${structureName}; falling back to HR dispatcher`,
+        );
+        return await dispatchToHrRfc(
+          context,
+          createStructureArgs,
+          structureName,
+        );
+      }
+
       logger?.error(`Error creating structure ${structureName}:`, error);
 
       // Check if structure already exists
@@ -390,4 +411,69 @@ export async function handleCreateStructure(
     }
     return return_error(error);
   }
+}
+
+async function dispatchToHrRfc(
+  context: HandlerContext,
+  args: CreateStructureArgs,
+  structureName: string,
+) {
+  const shouldActivate = args.activate !== false;
+
+  const fields = args.fields.map((field) => {
+    const rollname = (field.data_element || field.domain || '').toUpperCase();
+    if (!rollname) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Field ${field.name} requires a data_element on legacy/HR systems (generic types are not supported by the dispatcher)`,
+      );
+    }
+    return {
+      fieldname: field.name.toUpperCase(),
+      rollname,
+      reftable: field.table_ref?.toUpperCase(),
+      reffield: undefined as string | undefined,
+    };
+  });
+
+  const includes = (args.includes || []).map((inc) => ({
+    structure: inc.name.toUpperCase(),
+    suffix: inc.suffix?.toUpperCase(),
+  }));
+
+  const spec: HrDdicStructureSpec = {
+    description: args.description || structureName,
+    fields,
+    includes,
+  };
+
+  const dispatcher = new HrDdicDispatcherClient(context);
+  const result = await dispatcher.invoke({
+    objectType: 'STRUCTURE',
+    objectName: structureName,
+    packageName: args.package_name,
+    transportRequest: args.transport_request,
+    spec,
+    activate: shouldActivate,
+  });
+
+  if (!result.success) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Failed to create structure ${structureName} via HR dispatcher: ${result.message}`,
+    );
+  }
+
+  return return_response({
+    data: JSON.stringify({
+      success: true,
+      structure_name: structureName,
+      package_name: args.package_name,
+      transport_request: args.transport_request || 'local',
+      activated: shouldActivate,
+      message: result.message,
+      log: result.log,
+      via: 'hr-ddic-dispatcher',
+    }),
+  } as AxiosResponse);
 }
