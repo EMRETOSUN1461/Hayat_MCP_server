@@ -68,21 +68,21 @@ function buildRequest(scenario) {
     }
     case 'tab': {
       const tabSpec = {
-        description: 'MCP-ADT ws test transparent table',
-        delivery_class: 'A',          // A = Application table
-        data_maintenance: 'X',        // X = Display/Maintenance Allowed
+        description: 'ZAI test transparent table',
+        delivery_class: 'A',
+        data_maintenance: 'X',
         fields: [
           { fieldname: 'MANDT', rollname: 'MANDT', keyflag: 'X', notnull: 'X' },
         ],
         includes: [
-          { structure: 'ZTEST_STR_001', suffix: '' },
+          { structure: 'ZAI_TEST_S01', suffix: '' },
         ],
       };
       return {
         fm_name: 'Z_HAYAT_DDIC_CREATE',
         params: JSON.stringify({
           IV_OBJECT_TYPE: 'TABLE',
-          IV_OBJECT_NAME: 'ZTEST_TAB_001',
+          IV_OBJECT_NAME: 'ZAI_TEST_T01',
           IV_PACKAGE: '$TMP',
           IV_TRANSPORT: '',
           IV_SPEC_JSON: JSON.stringify(tabSpec),
@@ -92,17 +92,17 @@ function buildRequest(scenario) {
     }
     case 'tt': {
       const ttSpec = {
-        description: 'MCP-ADT ws test table type',
-        rowtype: 'ZTEST_STR_001',
-        rowkind: 'S',          // S = structure ref (mirrors BAPIRETTAB)
-        accessmode: 'T',       // T = standard table
-        keykind: 'N',          // N = non-unique (mirrors BAPIRETTAB KEYDEF='D'+KEYKIND='N')
+        description: 'ZAI test table type',
+        rowtype: 'ZAI_TEST_S01',
+        rowkind: 'S',
+        accessmode: 'T',
+        keykind: 'N',
       };
       return {
         fm_name: 'Z_HAYAT_DDIC_CREATE',
         params: JSON.stringify({
           IV_OBJECT_TYPE: 'TTYP',
-          IV_OBJECT_NAME: 'ZTEST_TT_001',
+          IV_OBJECT_NAME: 'ZAI_TEST_TT01',
           IV_PACKAGE: '$TMP',
           IV_TRANSPORT: '',
           IV_SPEC_JSON: JSON.stringify(ttSpec),

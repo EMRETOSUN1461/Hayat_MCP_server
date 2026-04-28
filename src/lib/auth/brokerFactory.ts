@@ -642,6 +642,49 @@ export class AuthBrokerFactory implements IAuthBrokerFactory {
     // Create EnvFileSessionStore that reads from specified .env file
     const sessionStore = new EnvFileSessionStore(envFilePath, storeLogger);
 
+    // Propagate runtime feature flags + bridge-essential connection fields
+    // from the .env file to process.env so modules that consult them
+    // directly (HR DDIC dispatcher routing, ZMCP_ADT websocket bridge,
+    // systemContext.detectLegacy) pick them up. The session store itself
+    // only exposes auth-related fields via its own API; raw values are
+    // read here for the small set of keys our process.env-readers need.
+    const PROPAGATE_KEYS = new Set([
+      'SAP_URL',
+      'SAP_USERNAME',
+      'SAP_PASSWORD',
+      'SAP_CLIENT',
+      'SAP_LANGUAGE',
+      'SAP_SYSTEM_TYPE',
+    ]);
+    try {
+      if (fs.existsSync(envFilePath)) {
+        const envContent = fs.readFileSync(envFilePath, 'utf8');
+        for (const rawLine of envContent.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (!line || line.startsWith('#')) continue;
+          const eq = line.indexOf('=');
+          if (eq === -1) continue;
+          const key = line.substring(0, eq).trim();
+          const isFlag = key.startsWith('SAP_USE_');
+          if (!isFlag && !PROPAGATE_KEYS.has(key)) continue;
+          const value = line
+            .substring(eq + 1)
+            .trim()
+            .replace(/^["']+|["']+$/g, '')
+            .trim();
+          if (process.env[key] === undefined) {
+            process.env[key] = value;
+          }
+        }
+      }
+    } catch (e) {
+      logger?.debug('Failed to propagate flags/connection from env file', {
+        type: 'ENV_FLAG_PROPAGATE_FAIL',
+        envFilePath,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
     // Get auth type from .env file to determine if we need token provider
     const authType = sessionStore.getAuthType();
 
@@ -740,6 +783,26 @@ export class AuthBrokerFactory implements IAuthBrokerFactory {
     // Validate required fields
     if (!envVars.SAP_URL) {
       throw new Error('.env file missing SAP_URL');
+    }
+
+    // Propagate runtime feature flags + bridge-essential connection fields
+    // from the .env file to process.env so process.env-reading consumers
+    // (HR DDIC dispatcher routing, ZMCP_ADT websocket bridge,
+    // systemContext.detectLegacy) pick them up.
+    const PROPAGATE_KEYS = new Set([
+      'SAP_URL',
+      'SAP_USERNAME',
+      'SAP_PASSWORD',
+      'SAP_CLIENT',
+      'SAP_LANGUAGE',
+      'SAP_SYSTEM_TYPE',
+    ]);
+    for (const [key, value] of Object.entries(envVars)) {
+      const isFlag = key.startsWith('SAP_USE_');
+      if (!isFlag && !PROPAGATE_KEYS.has(key)) continue;
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
     }
 
     // Build connection config from .env
