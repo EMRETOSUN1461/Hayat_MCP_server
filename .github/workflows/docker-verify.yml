@@ -1,0 +1,64 @@
+name: Docker Build Verify
+
+# Pre-deploy drift check: builds the Docker image and verifies that all
+# Hayat ABAP rule files (resources/*.md) reach /app/resources/ inside the
+# container. Catches regressions in .dockerignore / Dockerfile that would
+# silently strip rule files from the deployed image.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docker/**'
+      - '.dockerignore'
+      - 'package.json'
+      - 'resources/**'
+      - 'src/handlers/system/readonly/handleGetHayatCodingStandards.ts'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docker/**'
+      - '.dockerignore'
+      - 'package.json'
+      - 'resources/**'
+      - 'src/handlers/system/readonly/handleGetHayatCodingStandards.ts'
+  workflow_dispatch:
+
+jobs:
+  verify-resources-in-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: docker build -f docker/Dockerfile -t mcp-abap-adt:verify .
+
+      - name: Verify rule files present in image
+        run: |
+          set -e
+          REQUIRED=(
+            "/app/resources/global.md"
+            "/app/resources/hayat_s4d.md"
+            "/app/resources/hayat_hhd.md"
+            "/app/resources/hayat_hrd.md"
+          )
+          for path in "${REQUIRED[@]}"; do
+            echo "Checking: $path"
+            docker run --rm --entrypoint test mcp-abap-adt:verify -f "$path" \
+              || { echo "✗ Missing: $path"; exit 1; }
+          done
+          echo "✓ All required rule files present in /app/resources/"
+
+      - name: Verify global rules contain KURAL #10
+        run: |
+          docker run --rm --entrypoint cat mcp-abap-adt:verify /app/resources/global.md \
+            | grep -q "KURAL #10" \
+            || { echo "✗ KURAL #10 not found in /app/resources/global.md"; exit 1; }
+          echo "✓ KURAL #10 (BDC son çare) present in deployed global.md"
