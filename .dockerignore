@@ -11,6 +11,8 @@ doc/
 docs/
 *.md
 !README.md
+# Keep rule files served by GetHayatCodingStandards at runtime
+!resources/**/*.md
 
 # Tests
 tests/

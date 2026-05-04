@@ -42,6 +42,8 @@ ENV NODE_ENV=production \
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
+# Coding-standards rule files read at runtime by GetHayatCodingStandards handler
+COPY --from=builder /app/resources ./resources
 
 # Create directories for service keys and sessions
 RUN mkdir -p /app/service-keys /app/sessions

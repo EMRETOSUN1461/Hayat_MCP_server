@@ -437,3 +437,74 @@ Devam için seçenek:
 2. Paralel Z tablo + key join öner — "paralel tablo yaklaşımıyla devam et"
 3. Talebi iptal et — "bu işten vazgeç"
 ```
+
+## KURAL #10 — Batch Input/BDC Son Çare; Önce BAPI/FM/CLASS Kontrolü
+
+> Bu kural **tüm sistemlerde** (S4D / HHD / HRD) geçerlidir ve KURAL #6 otonom davranıştan **önce** uygulanan bir ön kontroldür. TS / talep analiz aşamasında, henüz obje yaratmadan tetiklenir.
+
+### Tetikleyici
+
+Talepte aşağıdaki ifadelerden biri geçerse veya bir SAP standart işlem koduna toplu kayıt atma gereksinimi tarif ediliyorsa kural devreye girer:
+
+- "Batch Input"
+- "BDC"
+- "SM35" / "SM36"
+- "Call Transaction"
+- "Recording" (SHDB)
+- "OB08'e toplu yükleme", "ME21N'e toplu giriş", "VA01'e toplu sipariş" gibi standart TCode'a toplu veri aktarma talebi
+
+### Akış
+
+1. **Önce BAPI/FM/Class araması** — `SearchObject` / `GetObjectsByType` / `GetWhereUsed` ile sistemde söz konusu işlemi karşılayan standart bir **BAPI / Function Module / Class** var mı kontrol et.
+
+2. **Karşılığı bulunduysa** → BDC'yi **reddet**, kullanıcı/danışmana geri dön. Yorum:
+   > "Bu iş için `<BAPI/FM_ADI>` standart olarak mevcut; BDC önerilmez. Geliştirme `<BAPI_ADI>` + `BAPI_TRANSACTION_COMMIT` üzerinden kurgulanmalı."
+
+3. **Hiçbir karşılığı yoksa** → BDC son çare olarak **kabul edilir**, izin verilir. Final raporda "BAPI alternatifi bulunamadığı için BDC kullanıldı, taranan tool'lar: ..." notu düşülür.
+
+### Yaygın eşleşmeler (tam liste değil — her TS için sistemde doğrula)
+
+| Standart TCode | Önerilen BAPI/FM |
+|---|---|
+| OB08 (kur tipi) | `BAPI_EXCHRATE_CREATEMULTIPLE` |
+| ME21N / ME21 (PR) | `BAPI_REQUISITION_CREATE` |
+| ME41 (RFQ) | `BAPI_QUOTATION_CREATEFROMDATA2` |
+| VA01 (sipariş) | `BAPI_SALESORDER_CREATEFROMDAT2` |
+| FB01 / F-02 (yevmiye) | `BAPI_ACC_DOCUMENT_POST` |
+| MM01 (malzeme) | `BAPI_MATERIAL_SAVEDATA` |
+| XK01 / XK02 (satıcı) | `BAPI_VENDOR_CREATE` / `VENDOR_INSERT` |
+| XD01 / XD02 (müşteri) | `BAPI_CUSTOMER_CREATEFROMDATA1` |
+| MIRO (gelen fatura) | `BAPI_INCOMINGINVOICE_CREATE` |
+| MIGO (mal hareketi) | `BAPI_GOODSMVT_CREATE` |
+| HR Master Data (PA30) | `HR_INFOTYPE_OPERATION` |
+| FK01 / FK02 (FI satıcı) | `BAPI_VENDOR_CREATE` |
+| FD01 / FD02 (FI müşteri) | `BAPI_CUSTOMER_CREATEFROMDATA1` |
+| CS01 (BOM) | `BAPI_MATERIAL_BOM_GROUP_CREATE` |
+
+### Sebep
+
+SAP upgrade veya support package ile ekran/dynpro yapısı değişince BDC'ler kırılır. Çalışma anında beklenmedik popup/uyarı (yetki, validasyon, info mesajı) çıkarsa BDC akışı bozulur ve veri tutarsızlığı oluşur. BAPI/FM çağrıları **upgrade-safe**, transactional ve popup'tan etkilenmez; `BAPI_TRANSACTION_COMMIT` / `ROLLBACK WORK` ile atomicite sağlanır.
+
+### Önceki kurallarla ilişki
+
+- KURAL #6 (otonom davranış) bu kural devreye girdiğinde **askıya alınır** — önce BAPI taraması yapılır, sonra geliştirme kararı verilir.
+- KURAL #5 (karar belirsizliği) burada uygulanmaz — BAPI bulunduysa kullanıcıya sorulmaz, doğrudan reddedilir ve alternatif önerilir.
+- KURAL #3 (MCP'nin üretemediği nesneler): BDC kabul edildiği durumlarda transaction code (SE93) ve SHDB recording manuel kalır; bu kapsamda zaten sessiz atlanır.
+
+### Reddetme çıktı formatı (BAPI bulunduğunda)
+
+```
+⚠️ BDC Kullanımı Reddedildi — KURAL #10
+
+Talep: <hangi TCode'a toplu yükleme>
+Bulunan alternatif: <BAPI/FM_ADI>
+Tarama yöntemi: <SearchObject / GetWhereUsed sorgusu>
+
+Geliştirme önerisi:
+- Ana akış: <BAPI_ADI> ile çağrı
+- Atomicite: BAPI_TRANSACTION_COMMIT / ROLLBACK WORK
+- Hata yönetimi: BAPIRET2 tablosu üzerinden satır bazlı raporlama
+
+Devam için: "BAPI ile devam et" veya "yine de BDC istiyorum, gerekçesi şu" yazın.
+```
+

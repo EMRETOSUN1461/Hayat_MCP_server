@@ -56,6 +56,7 @@
     "build": "npx biome check --write --diagnostic-level=error src && npx tsc -p tsconfig.json",
     "build:fast": "npx tsc -p tsconfig.json",
     "check-todos": "node tools/check-todos.js",
+    "check:rule-drift": "node tools/check-rule-drift.js",
     "start": "node ./bin/mcp-abap-adt.js",
     "start:http": "node ./bin/mcp-abap-adt.js --transport=http",
     "start:sse": "node ./bin/mcp-abap-adt.js --transport=sse",
@@ -170,6 +171,7 @@
     "dist/",
     "bin/",
     "docs/",
+    "resources/",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

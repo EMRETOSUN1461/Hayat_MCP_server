@@ -14,7 +14,7 @@ export const TOOL_DEFINITION = {
   name: 'GetHayatCodingStandards',
   available_in: ['onprem', 'cloud', 'legacy'] as const,
   description:
-    '[read-only] Hayat Holding ABAP geliştirme standartlarını döndürür. Her geliştirme talebi öncesinde çağrılmalıdır. Naming conventions, coding rules, exit/BAdI framework, utility classes ve agent davranış kurallarını içerir. Sistem bazlı kural setleri: S4D (Hayat S/4HANA), HHD (Hayat HR Dev), HRD (Hayat ECC EHP7).',
+    '[read-only] Hayat Holding ABAP geliştirme standartlarını döndürür. Her geliştirme talebi öncesinde çağrılmalıdır. Naming conventions, coding rules, exit/BAdI framework, utility classes ve agent davranış kurallarını içerir. Sistem bazlı kural setleri: S4D (Hayat S/4HANA), HHD (Hayat HR Dev), HRD (Hayat ECC EHP7). Default (section="all") çağrıda sistemler-arası global kurallar (KURAL #1-#10, BDC son çare dahil) yanıtın başına eklenir.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -48,6 +48,8 @@ const SYSTEM_FILE_MAP: Record<string, string> = {
   HHD: 'hayat_hhd.md',
   HRD: 'hayat_hrd.md',
 };
+
+const GLOBAL_RULES_FILE = 'global.md';
 
 interface GetHayatCodingStandardsArgs {
   system?: 'S4D' | 'HHD' | 'HRD';
@@ -126,8 +128,24 @@ export async function handleGetHayatCodingStandards(
 
     const fullContent = fs.readFileSync(resourcePath, 'utf-8');
 
-    const result =
+    let result =
       section === 'all' ? fullContent : extractSection(fullContent, section);
+
+    if (section === 'all') {
+      const globalPath = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        '..',
+        'resources',
+        GLOBAL_RULES_FILE,
+      );
+      if (fs.existsSync(globalPath)) {
+        const globalContent = fs.readFileSync(globalPath, 'utf-8');
+        result = `${globalContent}\n\n---\n\n# Sistem-Bazlı Kodlama Standartları (${system})\n\n${result}`;
+      }
+    }
 
     return return_response({
       data: result,

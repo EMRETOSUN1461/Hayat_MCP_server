@@ -1,10 +1,56 @@
 # MCP ABAP ADT - Development Guide
 
+## 📍 Source of Truth — Tüm Kural ve Tool Değişiklikleri
+
+**Bu repo Hayat ABAP geliştirme kuralları ve MCP tool'ları için TEK MERKEZDİR.** Local Claude Desktop, Azure-deploy Claude SDK ve Claude Code agent — hepsi MCP server üzerinden aynı kaynaklardan beslenir. Sürüklenme / çakışma / eksik kural önlenir.
+
+> Her commit / deploy öncesi drift kontrolü için: `npm run check:rule-drift`
+
+### Nereye ne yazılır
+
+| Değişiklik tipi | Hedef dosya | Etki |
+|---|---|---|
+| Sistemler-arası agent kuralı (KURAL #N) | `resources/global.md` | `GetHayatCodingStandards` default 'all' çağrısında otomatik prepend |
+| S4D sistem-bazlı standart | `resources/hayat_s4d.md` | `GetHayatCodingStandards({system: "S4D"})` |
+| HHD sistem-bazlı standart | `resources/hayat_hhd.md` | `GetHayatCodingStandards({system: "HHD"})` |
+| HRD/ECC sistem-bazlı standart | `resources/hayat_hrd.md` | `GetHayatCodingStandards({system: "HRD"})` |
+| Yeni MCP tool / tool değişikliği / bug fix | `src/handlers/<group>/...` + handler index | `npm run build` sonrası deploy |
+| Deploy konfigürasyonu | `docker/Dockerfile`, `.dockerignore`, `package.json` "files" | Docker imajı |
+
+### NEREYE ASLA YAZMA
+
+- ❌ `~/.claude/projects/.../memory/` — agent'ın lokal hafızası, deploy ile gitmez, drift kaynağıdır
+- ❌ Diğer makine config'leri (`claude_desktop_config.json` vb.) — deployment plumbing, kural değildir
+- ❌ Test config (`tests/test-config.yaml` — gitignored), `.env*` (gitignored) — kural koymak için yer değil
+- ❌ Gitignored / dockerignored herhangi bir dizin
+
+### Deploy zinciri
+
+1. Repo değişiklikleri → `git push origin main`
+2. CI/CD veya manuel: `docker build` → image registry
+3. Azure Kubernetes pull + deploy
+4. `resources/*.md` konteyner içinde `/app/resources/` altında hazır
+5. Tüm caller'lar (Claude Desktop, SDK, Claude Code) `GetHayatCodingStandards` ile **aynı** ve **güncel** kuralları alır
+
+### Drift Tespiti
+
+Lokal memory dizini sadece `MEMORY.md` index pointer'ı içermelidir. Başka kural dosyası → drift.
+
+`npm run check:rule-drift` aşağıdakileri kontrol eder:
+- Lokal agent memory'de rule dosyası yok
+- `resources/global.md` ve `resources/hayat_*.md` mevcut
+- `.dockerignore` rule dosyalarını re-include ediyor (`!resources/**/*.md`)
+- `Dockerfile` resources/ kopyalıyor
+- `package.json` "files" array'i resources/ içeriyor
+- CLAUDE.md eski mirror dosyasını referanslamıyor
+
+---
+
 ## Agent Davranış Kuralları
 
 Bu projede çalışan tüm agent oturumları (Claude Code, Azure-hosted agent, vs.) aşağıdaki kural setlerini okumakla yükümlüdür:
 
-- **Sistemler-arası kurallar**: [`docs/agent-rules/global.md`](docs/agent-rules/global.md) — sistem seçimi, transport sorma, MCP'nin üretemediği nesneler, sistem-bazlı kısıtlar, **DDIC değişiklik güvenliği** (standart tablo/append/data element/domain için katı koruma — KURAL #9).
+- **Sistemler-arası kurallar**: [`resources/global.md`](resources/global.md) — sistem seçimi, transport otonom yönetimi, MCP'nin üretemediği nesneler, sistem-bazlı kısıtlar, **DDIC değişiklik güvenliği** (standart tablo/append/data element/domain için katı koruma — KURAL #9), **BDC son çare** (KURAL #10). `GetHayatCodingStandards` default 'all' çağrısında otomatik olarak yanıtın başına eklenir.
 - **Sistem-bazlı kodlama standartları**: MCP server'ın `GetHayatCodingStandards` tool'undan alınır:
   - `GetHayatCodingStandards({system: "S4D"})` → S4HANA standartları (`resources/hayat_s4d.md`)
   - `GetHayatCodingStandards({system: "HHD"})` → HR Dev standartları (`resources/hayat_hhd.md`)
